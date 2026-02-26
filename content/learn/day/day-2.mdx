@@ -1,0 +1,92 @@
+---
+title: "Day 2: 深度对话 - Prompt 技巧 + Workspace 配置"
+day: 2
+description: "掌握高效的 Prompt 编写技巧，配置个性化的工作空间"
+difficulty: "beginner"
+duration: "30 min"
+hook: "高级 Prompt 模板库 → 加入社群获取"
+---
+
+## 让 AI 真正理解你的意图
+
+昨天我们成功安装了 OpenClaw 并完成了第一次对话。今天，我们将学习如何与 AI 进行更高效的沟通——这是决定你能否真正驾驭 AI 的关键技能。
+
+### 为什么 Prompt 很重要？
+
+很多人觉得和 AI 对话就是「随便说两句」，但事实上，Prompt（提示词）的质量直接决定了 AI 输出的质量。一个精心设计的 Prompt 和一个随意编写的 Prompt，得到的结果可能天差地别。
+
+举个例子：
+
+- **普通 Prompt**：「帮我写一篇文章」
+- **优质 Prompt**：「请以技术博客的风格，写一篇关于 Docker 容器化部署的入门教程，目标读者是有基础 Linux 经验的开发者，字数控制在 1500 字左右，包含实际的命令示例」
+
+第二种方式给了 AI 足够的上下文信息：角色、主题、读者画像、格式要求，自然能得到更精准的输出。
+
+### Prompt 编写四要素
+
+在 OpenClaw 中编写高质量 Prompt，记住这四个要素——CRTE 框架：
+
+1. **Context（上下文）**：告诉 AI 你的背景和场景
+2. **Role（角色）**：让 AI 扮演特定角色
+3. **Task（任务）**：明确描述你想要完成的事情
+4. **Expectation（期望）**：说明输出格式和质量标准
+
+```
+你是一位资深的 Python 开发工程师（Role），
+我正在开发一个电商后台系统（Context），
+请帮我设计用户权限管理模块的数据库表结构（Task），
+请用 SQL 建表语句输出，并添加中文注释说明每个字段的用途（Expectation）。
+```
+
+### Workspace 配置
+
+OpenClaw 的 Workspace 功能让你可以为不同的项目创建独立的工作空间，每个空间可以有自己的配置、Prompt 模板和上下文记忆。
+
+#### 创建工作空间
+
+```bash
+# 创建一个名为 my-project 的工作空间
+openclaw workspace create my-project
+
+# 切换到该工作空间
+openclaw workspace use my-project
+```
+
+#### 配置工作空间
+
+在工作空间目录下，编辑 `.openclaw/config.yaml` 文件：
+
+```yaml
+workspace:
+  name: my-project
+  model: gpt-4
+  temperature: 0.7
+  system_prompt: |
+    你是一位全栈开发助手，精通 React 和 Node.js。
+    项目使用 TypeScript，请始终遵循项目的代码风格。
+  context_files:
+    - ./README.md
+    - ./docs/architecture.md
+```
+
+通过 `system_prompt` 设置，每次对话开始时 AI 都会自动加载这个角色设定，无需重复输入。
+
+### 实用 Prompt 模板
+
+以下是几个在日常工作中非常实用的 Prompt 模板：
+
+**代码审查模板**：
+```
+请审查以下代码，关注：1) 潜在的 bug 2) 性能问题 3) 安全漏洞 4) 代码风格改进建议。
+```
+
+**技术方案模板**：
+```
+请针对 [需求描述] 提供技术方案，包含：架构设计、技术选型理由、核心流程图、风险评估。
+```
+
+### 今日小结
+
+今天你学到了高效 Prompt 编写的核心方法和 Workspace 配置技巧。记住 CRTE 框架，它会让你和 AI 的每一次对话都更加高效。
+
+> 💡 **想获取更多模板？** 高级 Prompt 模板库 → 加入社群获取

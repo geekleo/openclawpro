@@ -1,0 +1,158 @@
+---
+title: "Day 6: 自动化 - Cron + Heartbeat"
+day: 6
+description: "学会设置定时任务和心跳监控，实现工作流自动化"
+difficulty: "beginner"
+duration: "30 min"
+hook: "企业级自动化工作流 → 精品课 Module 6"
+---
+
+## 让 AI 自动为你工作
+
+到今天为止，你已经学会了 OpenClaw 的大部分核心功能。但之前的操作都需要手动触发——你发一条指令，AI 执行一次任务。今天，我们将学习如何让 OpenClaw 自动运行，像一个 7x24 小时在岗的智能员工。
+
+### Cron 定时任务
+
+OpenClaw 内置了强大的定时任务系统，语法与 Linux Cron 完全兼容，但使用起来更加友好。
+
+#### 创建定时任务
+
+```bash
+# 交互式创建
+openclaw cron create
+
+# 命令行直接创建
+openclaw cron add --name "daily-report" \
+  --schedule "0 9 * * *" \
+  --task "生成今日工作日报并发送到企业微信群"
+```
+
+#### 常用调度示例
+
+```yaml
+cron_jobs:
+  # 每天早上 9 点生成日报
+  daily_report:
+    schedule: "0 9 * * *"
+    task: |
+      1. 从 Jira 获取昨日完成的任务列表
+      2. 从 Git 获取昨日代码提交记录
+      3. 汇总生成工作日报
+      4. 发送到企业微信 #team-daily 频道
+
+  # 每周五下午 5 点生成周报
+  weekly_summary:
+    schedule: "0 17 * * 5"
+    task: |
+      1. 汇总本周所有日报数据
+      2. 分析本周关键指标变化
+      3. 生成周报并保存为 PDF
+      4. 邮件发送给项目经理
+
+  # 每隔 2 小时检查服务器状态
+  health_check:
+    schedule: "0 */2 * * *"
+    task: |
+      1. 检查所有服务端口响应状态
+      2. 检查 CPU、内存、磁盘使用率
+      3. 如有异常立即发送告警通知
+```
+
+### Heartbeat 心跳监控
+
+Heartbeat 是 OpenClaw 的智能监控系统。它不仅可以监控服务状态，还能在检测到异常时自动执行预设的修复方案。
+
+#### 配置心跳监控
+
+```yaml
+heartbeat:
+  # 网站可用性监控
+  website_monitor:
+    url: "https://your-app.com"
+    interval: 60  # 每 60 秒检查一次
+    timeout: 10   # 超时时间 10 秒
+    on_failure:
+      - action: notify
+        channel: "slack:#alerts"
+        message: "网站无法访问！"
+      - action: restart
+        service: "web-server"
+      - action: escalate
+        after: 3  # 连续 3 次失败后升级
+        notify: "oncall@company.com"
+
+  # API 响应时间监控
+  api_performance:
+    url: "https://api.your-app.com/health"
+    interval: 30
+    thresholds:
+      response_time: 2000  # 响应时间超过 2 秒告警
+      error_rate: 5        # 错误率超过 5% 告警
+```
+
+#### 启动和管理监控
+
+```bash
+# 启动心跳监控
+openclaw heartbeat start
+
+# 查看监控状态
+openclaw heartbeat status
+
+# 查看监控历史记录
+openclaw heartbeat history --last 24h
+
+# 暂停特定监控
+openclaw heartbeat pause website_monitor
+```
+
+### 自动化工作流编排
+
+将 Cron 和 Heartbeat 结合起来，可以构建复杂的自动化工作流：
+
+```yaml
+workflows:
+  content_pipeline:
+    trigger:
+      type: cron
+      schedule: "0 8 * * 1-5"  # 工作日早上 8 点
+    steps:
+      - name: "采集信息"
+        task: "搜索今日 AI 领域的热点新闻 Top 10"
+      - name: "内容生成"
+        task: "根据热点生成 3 篇社交媒体文案"
+        depends_on: "采集信息"
+      - name: "质量审核"
+        task: "检查文案的语法、事实准确性"
+        depends_on: "内容生成"
+      - name: "定时发布"
+        task: "将审核通过的文案发布到各平台"
+        depends_on: "质量审核"
+    on_error:
+      notify: "content-team@company.com"
+```
+
+### 任务日志与调试
+
+自动化任务的调试和监控同样重要：
+
+```bash
+# 查看任务执行日志
+openclaw cron logs daily-report --tail 50
+
+# 手动触发一次任务（用于测试）
+openclaw cron trigger daily-report --dry-run
+
+# 查看任务执行统计
+openclaw cron stats
+```
+
+### 今日小结
+
+今天你学会了让 OpenClaw 自动化运行的关键技能：
+
+1. 使用 Cron 设置各种定时任务
+2. 使用 Heartbeat 进行智能监控
+3. 编排复杂的自动化工作流
+
+> 💡 **想深入学习？** 企业级自动化工作流 → 精品课 Module 6

@@ -1,0 +1,145 @@
+---
+title: "Day 5: 技能扩展 - ClawHub 技能安装"
+day: 5
+description: "探索 ClawHub 生态系统，安装和使用社区开发的技能包"
+difficulty: "beginner"
+duration: "30 min"
+hook: "自定义 Skill 开发教程 → 精品课 Module 5"
+---
+
+## 用技能包武装你的 AI 助手
+
+经过前四天的学习，你已经掌握了 OpenClaw 的核心功能。今天我们将进入一个全新的领域——ClawHub 技能生态系统。通过安装社区开发的技能包，你可以让 OpenClaw 获得几乎无限的能力扩展。
+
+### 什么是 ClawHub？
+
+ClawHub 是 OpenClaw 的官方技能市场，类似于 VS Code 的插件商店或手机的应用商店。在这里，社区开发者分享了各种实用的技能包（Skill），涵盖开发、设计、运维、数据分析、内容创作等多个领域。
+
+截至目前，ClawHub 上已有超过 2000 个活跃技能包，每周还在持续增加。
+
+### 浏览和搜索技能
+
+```bash
+# 打开技能市场
+openclaw hub browse
+
+# 按分类浏览
+openclaw hub browse --category development
+
+# 搜索特定技能
+openclaw hub search "数据库管理"
+
+# 查看技能详情
+openclaw hub info @devtools/sql-assistant
+```
+
+### 安装技能
+
+找到心仪的技能包后，安装过程非常简单：
+
+```bash
+# 安装单个技能
+openclaw skill install @devtools/sql-assistant
+
+# 安装多个技能
+openclaw skill install @devtools/sql-assistant @content/blog-writer @ops/docker-helper
+
+# 安装到特定工作空间
+openclaw skill install @devtools/sql-assistant --workspace my-project
+```
+
+### 热门技能推荐
+
+以下是当前最受欢迎的几个技能包，推荐新手优先安装：
+
+#### 1. @devtools/code-reviewer（代码审查助手）
+
+自动审查代码质量，检测潜在 bug、安全漏洞和性能问题。
+
+```bash
+> 请用 code-reviewer 技能审查 ./src 目录下的所有 TypeScript 文件
+```
+
+#### 2. @content/blog-writer（博客写作助手）
+
+帮你快速创作高质量的技术博客文章，支持 SEO 优化。
+
+```bash
+> 使用 blog-writer 帮我写一篇关于 React Server Components 的技术博客
+```
+
+#### 3. @ops/docker-helper（Docker 运维助手）
+
+Docker 相关的一切操作，包括编写 Dockerfile、排查容器问题等。
+
+```bash
+> 请用 docker-helper 帮我优化当前项目的 Dockerfile，减小镜像体积
+```
+
+#### 4. @data/csv-analyzer（数据分析助手）
+
+读取和分析 CSV、Excel 等数据文件，生成可视化图表。
+
+```bash
+> 用 csv-analyzer 分析 ./data/sales.csv，生成月度趋势图
+```
+
+### 技能管理
+
+安装技能后，你可能需要进行一些管理操作：
+
+```bash
+# 查看已安装的技能列表
+openclaw skill list
+
+# 更新技能到最新版本
+openclaw skill update @devtools/sql-assistant
+
+# 批量更新所有技能
+openclaw skill update --all
+
+# 卸载不需要的技能
+openclaw skill remove @content/blog-writer
+
+# 查看技能使用统计
+openclaw skill stats
+```
+
+### 技能配置
+
+大多数技能支持自定义配置。在工作空间的配置文件中添加技能设置：
+
+```yaml
+skills:
+  "@devtools/code-reviewer":
+    severity: strict
+    languages: ["typescript", "python"]
+    ignore_patterns: ["*.test.ts", "*.spec.ts"]
+  "@content/blog-writer":
+    default_language: "zh-CN"
+    style: "technical"
+    word_count: 1500
+```
+
+### 组合使用技能
+
+技能包的真正威力在于组合使用。例如：
+
+```bash
+> 请执行以下工作流：
+  1. 用 code-reviewer 审查 ./src 目录
+  2. 根据审查结果自动修复代码问题
+  3. 用 blog-writer 生成一份本次代码优化的总结报告
+```
+
+多个技能协同工作，可以完成单个技能无法实现的复杂任务。
+
+### 今日小结
+
+今天你进入了 ClawHub 的世界，学到了：
+
+1. ClawHub 技能生态系统的基本概念
+2. 如何搜索、安装和管理技能包
+3. 如何配置和组合使用多个技能
+
+> 💡 **想开发自己的技能？** 自定义 Skill 开发教程 → 精品课 Module 5

@@ -1,0 +1,276 @@
+---
+title: "Docker Compose 生产环境配置指南"
+description: "使用 Docker Compose 在生产环境中部署和管理 OpenClaw"
+category: "deploy"
+tags: ["Docker", "部署", "运维"]
+date: "2026-02-15"
+---
+
+## 为什么选择 Docker Compose？
+
+在生产环境中部署 OpenClaw，Docker Compose 是最推荐的方案之一。它提供了容器编排、服务管理、环境隔离等关键能力，让部署和运维变得简单可靠。
+
+相比裸机部署，Docker Compose 方案具有以下优势：
+
+- **环境一致性**：开发、测试、生产环境完全一致，告别「在我机器上能跑」的问题
+- **一键部署**：一条命令启动所有服务，无需手动安装各种依赖
+- **水平扩展**：轻松实现服务副本扩展，应对流量增长
+- **回滚方便**：出问题时可以快速回滚到上一个稳定版本
+
+## 架构设计
+
+生产环境的 OpenClaw 部署通常包含以下组件：
+
+```
+┌─────────────────────────────────────────────┐
+│                  Nginx                       │
+│             (反向代理 + SSL)                  │
+├─────────────────────────────────────────────┤
+│         OpenClaw Application                 │
+│            (核心应用服务)                      │
+├──────────────────┬──────────────────────────┤
+│      Redis       │     PostgreSQL            │
+│   (缓存 + 队列)   │    (持久化存储)             │
+└──────────────────┴──────────────────────────┘
+```
+
+## 完整配置文件
+
+创建 `docker-compose.yml` 文件：
+
+```yaml
+version: "3.8"
+
+services:
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - openclaw
+    networks:
+      - openclaw-net
+
+  # OpenClaw 核心服务
+  openclaw:
+    image: openclaw/openclaw:2026.2
+    restart: always
+    expose:
+      - "8080"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_API_KEY=${API_KEY}
+      - OPENCLAW_DB_HOST=postgres
+      - OPENCLAW_DB_PORT=5432
+      - OPENCLAW_DB_NAME=openclaw
+      - OPENCLAW_DB_USER=${DB_USER}
+      - OPENCLAW_DB_PASSWORD=${DB_PASSWORD}
+      - OPENCLAW_REDIS_URL=redis://redis:6379
+      - OPENCLAW_LOG_LEVEL=info
+      - OPENCLAW_MAX_WORKERS=4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+        reservations:
+          memory: 2G
+          cpus: "1.0"
+    networks:
+      - openclaw-net
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_DB=openclaw
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d openclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openclaw-net
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openclaw-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  openclaw-net:
+    driver: bridge
+```
+
+## 环境变量配置
+
+创建 `.env` 文件管理敏感配置：
+
+```env
+# API 配置
+API_KEY=your-openclaw-api-key
+
+# 数据库配置
+DB_USER=openclaw
+DB_PASSWORD=your-strong-db-password
+
+# 域名配置
+DOMAIN=openclaw.yourdomain.com
+```
+
+**重要提示**：`.env` 文件包含敏感信息，务必将其加入 `.gitignore`，不要提交到代码仓库。
+
+## Nginx 配置
+
+创建 `nginx/conf.d/openclaw.conf`：
+
+```nginx
+upstream openclaw_backend {
+    server openclaw:8080;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name openclaw.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name openclaw.yourdomain.com;
+
+    ssl_certificate /etc/nginx/ssl/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+
+    # 安全头
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location / {
+        proxy_pass http://openclaw_backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket 支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 超时设置
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+```
+
+## 部署和运维命令
+
+```bash
+# 首次启动
+docker compose up -d
+
+# 查看服务状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f openclaw
+
+# 更新版本
+docker compose pull openclaw
+docker compose up -d openclaw
+
+# 数据库备份
+docker compose exec postgres pg_dump -U openclaw openclaw > backup_$(date +%Y%m%d).sql
+
+# 重启单个服务
+docker compose restart openclaw
+
+# 扩展服务副本（需要负载均衡配置）
+docker compose up -d --scale openclaw=3
+```
+
+## 监控和告警
+
+生产环境强烈建议配置监控。在 `docker-compose.yml` 中添加监控服务：
+
+```yaml
+  # 可选：Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus:/etc/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - openclaw-net
+```
+
+## 常见问题
+
+### 容器频繁重启
+
+检查内存限制是否设置过低，OpenClaw 在处理复杂任务时可能需要更多内存。建议生产环境至少分配 4GB 内存。
+
+### 数据库连接池耗尽
+
+在高并发场景下可能出现此问题。调整 OpenClaw 配置中的连接池大小：
+
+```yaml
+environment:
+  - OPENCLAW_DB_POOL_SIZE=20
+  - OPENCLAW_DB_POOL_TIMEOUT=30000
+```
+
+### SSL 证书自动续期
+
+推荐使用 certbot 配合 cron 实现 Let's Encrypt 证书的自动续期，确保 HTTPS 服务不会因证书过期而中断。
+
+## 总结
+
+Docker Compose 为 OpenClaw 的生产部署提供了完善的解决方案。通过本文的配置，你可以获得一个安全、稳定、易于维护的生产级 OpenClaw 部署。建议定期备份数据、更新镜像版本，并持续监控服务健康状态。

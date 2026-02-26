@@ -1,0 +1,158 @@
+---
+title: "Day 7: 高级玩法 - 多 Agent + 浏览器控制"
+day: 7
+description: "探索多 Agent 协作和浏览器自动化控制的高级功能"
+difficulty: "beginner"
+duration: "30 min"
+hook: "Multi-Agent 架构设计 → 精品课 Module 7"
+---
+
+## 解锁 OpenClaw 的终极形态
+
+恭喜你来到七天训练营的最后一天！今天我们将探索 OpenClaw 最令人兴奋的高级功能——多 Agent 协作和浏览器控制。掌握这些技能后，你将真正理解 AI 助手的无限可能。
+
+### 多 Agent 架构
+
+单个 AI 代理虽然强大，但面对复杂任务时，多个专业化的 Agent 协同工作可以产生 1+1 远大于 2 的效果。
+
+#### 什么是多 Agent？
+
+想象你有一个开发团队：前端工程师、后端工程师、测试工程师、产品经理。每个人都有自己的专业领域，他们协同工作完成一个项目。多 Agent 模式就是这个概念的 AI 版本。
+
+#### 创建 Agent 团队
+
+```yaml
+agents:
+  architect:
+    name: "架构师"
+    role: "负责系统架构设计和技术决策"
+    model: gpt-4
+    skills: ["@devtools/system-design"]
+
+  developer:
+    name: "开发者"
+    role: "负责代码编写和实现"
+    model: gpt-4
+    skills: ["@devtools/code-reviewer", "@devtools/sql-assistant"]
+
+  tester:
+    name: "测试工程师"
+    role: "负责编写测试用例和质量保障"
+    model: gpt-4
+    skills: ["@devtools/test-generator"]
+
+  reviewer:
+    name: "代码审查员"
+    role: "负责代码审查和最佳实践检查"
+    model: gpt-4
+    skills: ["@devtools/code-reviewer"]
+```
+
+#### 多 Agent 协作流程
+
+```bash
+> 请用多 Agent 模式完成以下项目：
+  开发一个用户注册登录系统
+
+  工作流程：
+  1. 架构师 → 设计系统架构和 API 接口
+  2. 开发者 → 根据架构设计编写代码
+  3. 测试工程师 → 编写并执行测试用例
+  4. 代码审查员 → 审查代码质量
+  5. 开发者 → 根据审查意见修改代码
+```
+
+执行这个命令后，你会看到多个 Agent 像真实的团队一样协作。架构师先输出设计方案，开发者据此编写代码，测试工程师验证功能，审查员提出改进意见——整个流程全自动完成。
+
+### 浏览器控制
+
+OpenClaw 集成了强大的浏览器自动化引擎，可以像人一样操控浏览器完成各种任务。
+
+#### 启用浏览器控制
+
+```bash
+# 安装浏览器控制依赖
+openclaw browser setup
+
+# 启动带浏览器的会话
+openclaw chat --browser
+```
+
+#### 基本操作
+
+```bash
+> 打开浏览器访问 https://github.com/trending
+
+> 在搜索框中输入 "OpenClaw"，然后点击搜索按钮
+
+> 截取当前页面的完整截图并保存
+```
+
+OpenClaw 会像真人一样操作浏览器：移动鼠标、点击按钮、输入文字、滚动页面。
+
+#### 实用场景
+
+**自动化表单填写**：
+```bash
+> 打开公司的请假系统，帮我提交一个明天的年假申请，理由写"个人事务"
+```
+
+**网页数据采集**：
+```bash
+> 访问竞品官网的定价页面，提取所有套餐的价格和功能对比，整理成表格
+```
+
+**自动化测试**：
+```bash
+> 打开我们的 Web 应用 http://localhost:3000，执行以下测试流程：
+  1. 注册一个测试账号
+  2. 登录系统
+  3. 创建一个新的项目
+  4. 上传一个测试文件
+  5. 验证文件是否上传成功
+  6. 截图记录每一步的结果
+```
+
+### 多 Agent + 浏览器的组合
+
+将两者结合，可以实现极其强大的自动化场景：
+
+```yaml
+workflow:
+  name: "竞品分析报告"
+  agents:
+    researcher:
+      task: "使用浏览器访问各竞品网站，收集产品信息"
+      browser: true
+    analyst:
+      task: "分析收集到的数据，识别市场趋势"
+    writer:
+      task: "撰写完整的竞品分析报告"
+  steps:
+    - agent: researcher
+      action: "访问 5 个竞品网站，截图并提取关键信息"
+    - agent: analyst
+      action: "对比分析数据，生成洞察"
+      depends_on: researcher
+    - agent: writer
+      action: "撰写报告并生成 PDF"
+      depends_on: analyst
+```
+
+### 七天总结
+
+回顾这七天，你已经从零开始掌握了 OpenClaw 的完整技能树：
+
+| 天数 | 主题 | 核心技能 |
+|------|------|----------|
+| Day 1 | 认识 OpenClaw | 安装部署、基础对话 |
+| Day 2 | 深度对话 | Prompt 技巧、Workspace 配置 |
+| Day 3 | 文件与代码 | 文件操作、代码生成 |
+| Day 4 | 联网能力 | 搜索、API 调用 |
+| Day 5 | 技能扩展 | ClawHub 技能安装 |
+| Day 6 | 自动化 | Cron、Heartbeat |
+| Day 7 | 高级玩法 | 多 Agent、浏览器控制 |
+
+你现在已经具备了驾驭 AI 助手的所有基础知识。但这只是开始——AI 的世界每天都在进化，持续学习才是保持竞争力的关键。
+
+> 💡 **准备进阶？** Multi-Agent 架构设计 → 精品课 Module 7
