@@ -1,0 +1,438 @@
+---
+title: "Tailscale 内网穿透远程访问 OpenClaw"
+description: "使用 Tailscale 组建虚拟专用网络，实现从任何地点安全访问部署在内网中的 OpenClaw 服务，涵盖安装配置、MagicDNS、子网路由和 ACL 权限控制"
+category: "部署篇"
+tags: ["Tailscale", "内网穿透", "VPN", "远程访问"]
+date: "2026-02-20"
+---
+
+## 前言
+
+当你在家里的 NAS 或公司内网的服务器上部署了 OpenClaw，想要从外部网络安全访问时，传统方案（端口转发、frp 等）往往配置复杂且存在安全隐患。Tailscale 作为一款基于 WireGuard 协议的零配置 VPN 工具，能够以极其简单的方式实现安全的内网穿透，是远程访问 OpenClaw 的最佳方案之一。
+
+## 一、Tailscale 简介和优势
+
+### 什么是 Tailscale？
+
+Tailscale 是一个基于 WireGuard 协议构建的 mesh VPN 网络服务。它的核心理念是将你所有的设备组成一个虚拟局域网（tailnet），每个设备都有一个固定的虚拟 IP 地址（100.x.y.z），无论设备处于什么物理网络环境，都可以像在同一个局域网中一样互相通信。
+
+### 核心优势
+
+- **零配置**：无需手动配置端口转发、防火墙规则或 DDNS，安装即用
+- **端到端加密**：基于 WireGuard 协议，所有流量端到端加密，即使 Tailscale 服务器也无法解密
+- **NAT 穿透**：自动穿透绝大多数 NAT 环境，包括对称 NAT
+- **Mesh 网络**：设备之间直接通信（P2P），不经过中间服务器，延迟极低
+- **免费计划够用**：免费计划支持最多 100 台设备和 3 个用户，个人使用完全足够
+- **跨平台支持**：支持 Windows、macOS、Linux、iOS、Android 以及群晖 NAS、路由器等
+
+### 与传统方案对比
+
+| 特性 | Tailscale | frp | 端口转发 | Cloudflare Tunnel |
+|------|-----------|-----|---------|-------------------|
+| 配置难度 | 极低 | 中等 | 低 | 中等 |
+| 安全性 | 高（端到端加密） | 中等 | 低 | 高 |
+| 需要公网 IP | 否 | 是（服务端） | 是 | 否 |
+| 需要域名 | 否 | 否 | 否 | 是 |
+| 延迟 | 极低（P2P） | 中等 | 低 | 中等 |
+| 免费额度 | 100 台设备 | 自建免费 | 免费 | 免费 |
+| 暴露端口 | 否 | 是 | 是 | 否 |
+
+## 二、在服务器端安装配置 Tailscale
+
+以下示范在运行 OpenClaw 的 Linux 服务器上安装 Tailscale。
+
+### Ubuntu/Debian 系统
+
+```bash
+# 添加 Tailscale 官方仓库
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# 启动 Tailscale 并进行认证
+sudo tailscale up
+
+# 命令会输出一个认证 URL，在浏览器中打开完成登录
+# https://login.tailscale.com/a/xxxxx
+```
+
+### CentOS/RHEL 系统
+
+```bash
+# 添加 Tailscale 仓库
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# 启动服务
+sudo systemctl enable --now tailscaled
+sudo tailscale up
+```
+
+### 群晖 NAS
+
+群晖 NAS 可以通过套件中心安装 Tailscale：
+
+1. 进入 DSM「套件中心」
+2. 搜索「Tailscale」
+3. 如果套件中心没有，从 Tailscale 官网下载群晖 SPK 包手动安装
+4. 安装完成后，打开 Tailscale 套件，点击「Login」完成认证
+
+或者通过 Docker 安装：
+
+```yaml
+# 在 docker-compose.yml 中添加 Tailscale 容器
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: nas-openclaw
+    restart: always
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    volumes:
+      - /volume1/docker/tailscale/state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - TS_AUTHKEY=tskey-auth-xxxxx  # 从 Tailscale 管理后台生成
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--advertise-tags=tag:server
+    network_mode: host
+```
+
+### 验证安装
+
+```bash
+# 查看 Tailscale 状态
+tailscale status
+
+# 输出示例：
+# 100.64.0.1   my-server    user@example.com  linux   -
+# 100.64.0.2   my-macbook   user@example.com  macOS   -
+
+# 查看本机的 Tailscale IP
+tailscale ip -4
+# 输出：100.64.0.1
+```
+
+## 三、在客户端安装 Tailscale
+
+### macOS
+
+```bash
+# 方式一：App Store 安装（推荐）
+# 在 App Store 搜索 "Tailscale" 安装
+
+# 方式二：Homebrew 安装
+brew install tailscale
+```
+
+### Windows
+
+1. 访问 [tailscale.com/download](https://tailscale.com/download) 下载 Windows 客户端
+2. 运行安装程序
+3. 从系统托盘图标中点击「Log in」完成认证
+
+### iOS / Android
+
+在 App Store 或 Google Play 搜索「Tailscale」安装，登录同一账号即可。
+
+### Linux 客户端
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+```
+
+安装完成后，所有使用同一账号登录的设备都会自动组成一个 tailnet 虚拟网络。
+
+## 四、通过 Tailscale IP 访问 OpenClaw
+
+### 确认服务器的 Tailscale IP
+
+```bash
+# 在运行 OpenClaw 的服务器上执行
+tailscale ip -4
+# 假设输出：100.64.0.1
+```
+
+### 直接访问
+
+在客户端设备的浏览器中输入：
+
+```
+http://100.64.0.1:3000
+```
+
+即可访问部署在内网的 OpenClaw，无需任何端口转发配置。
+
+### 确认连接状态
+
+```bash
+# 在客户端上测试连通性
+tailscale ping 100.64.0.1
+
+# 输出示例（P2P 直连，延迟极低）：
+# pong from my-server (100.64.0.1) via 203.0.113.10:41641 in 12ms
+
+# 如果显示 "via DERP"，说明走了中继，延迟会稍高
+# pong from my-server (100.64.0.1) via DERP(tok) in 85ms
+```
+
+## 五、MagicDNS 配置
+
+MagicDNS 是 Tailscale 提供的自动 DNS 服务，让你可以使用设备名称而非 IP 地址来访问。
+
+### 启用 MagicDNS
+
+1. 登录 [Tailscale 管理后台](https://login.tailscale.com/admin/dns)
+2. 进入「DNS」设置页面
+3. 在「MagicDNS」区域点击「Enable」
+
+### 使用设备名称访问
+
+启用后，你可以使用更友好的域名访问 OpenClaw：
+
+```
+http://my-server:3000
+```
+
+### 自定义 tailnet 名称
+
+在 DNS 设置中，你可以设置 tailnet 名称（如 `mynet`），之后完整域名为：
+
+```
+http://my-server.mynet.ts.net:3000
+```
+
+### 启用 HTTPS（MagicDNS + HTTPS）
+
+Tailscale 提供自动 HTTPS 证书功能：
+
+```bash
+# 在服务器上启用 HTTPS 证书
+sudo tailscale cert my-server.mynet.ts.net
+
+# 证书会自动保存到：
+# /etc/tailscale/certs/my-server.mynet.ts.net.crt
+# /etc/tailscale/certs/my-server.mynet.ts.net.key
+```
+
+配合 Nginx 使用自动证书：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name my-server.mynet.ts.net;
+
+    ssl_certificate /etc/tailscale/certs/my-server.mynet.ts.net.crt;
+    ssl_certificate_key /etc/tailscale/certs/my-server.mynet.ts.net.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+这样就可以通过 `https://my-server.mynet.ts.net` 安全访问 OpenClaw 了。
+
+## 六、子网路由配置
+
+子网路由（Subnet Router）允许你将整个内网子网暴露给 tailnet 中的其他设备，这样即使内网中的其他服务没有安装 Tailscale，也可以通过 Tailscale 网络访问。
+
+### 使用场景
+
+假设你的 OpenClaw 部署在 `192.168.1.100`，内网中还有其他相关服务（如独立部署的数据库、监控面板等），可以通过子网路由一并访问。
+
+### 配置子网路由
+
+```bash
+# 在安装了 Tailscale 的内网机器上，广播子网路由
+sudo tailscale up --advertise-routes=192.168.1.0/24
+
+# 开启 IP 转发（Linux 系统必需）
+echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
+echo 'net.ipv6.conf.all.forwarding = 1' | sudo tee -a /etc/sysctl.d/99-tailscale.conf
+sudo sysctl -p /etc/sysctl.d/99-tailscale.conf
+```
+
+### 在管理后台批准路由
+
+1. 登录 Tailscale 管理后台
+2. 找到广播路由的设备
+3. 点击设备详情 -> 「Edit route settings」
+4. 批准 `192.168.1.0/24` 路由
+
+### 客户端使用
+
+批准后，tailnet 中的其他设备可以直接使用内网 IP 访问：
+
+```bash
+# 直接使用内网 IP 访问 OpenClaw
+curl http://192.168.1.100:3000
+
+# 访问内网中其他服务
+curl http://192.168.1.200:8080  # 例如监控面板
+```
+
+## 七、ACL 权限控制
+
+Tailscale 的 ACL（Access Control List）功能允许你精细控制哪些设备可以访问哪些服务。
+
+### 进入 ACL 编辑器
+
+登录 Tailscale 管理后台，进入「Access Controls」页面。
+
+### 基础 ACL 配置示例
+
+```json
+{
+  "tagOwners": {
+    "tag:server": ["autogroup:admin"],
+    "tag:client": ["autogroup:admin"]
+  },
+  "acls": [
+    // 允许管理员访问所有设备的所有端口
+    {
+      "action": "accept",
+      "src": ["autogroup:admin"],
+      "dst": ["*:*"]
+    },
+    // 允许带 client 标签的设备仅访问 OpenClaw 服务端口
+    {
+      "action": "accept",
+      "src": ["tag:client"],
+      "dst": ["tag:server:3000", "tag:server:443"]
+    }
+  ]
+}
+```
+
+### 为设备分配标签
+
+```bash
+# 在服务器端设置标签
+sudo tailscale up --advertise-tags=tag:server
+
+# 在客户端设置标签
+sudo tailscale up --advertise-tags=tag:client
+```
+
+### 高级 ACL 场景
+
+```json
+{
+  "tagOwners": {
+    "tag:openclaw-server": ["autogroup:admin"],
+    "tag:openclaw-admin": ["autogroup:admin"],
+    "tag:openclaw-user": ["autogroup:admin"]
+  },
+  "acls": [
+    // 管理员：完全访问权限
+    {
+      "action": "accept",
+      "src": ["tag:openclaw-admin"],
+      "dst": ["tag:openclaw-server:*"]
+    },
+    // 普通用户：仅能访问 Web 界面
+    {
+      "action": "accept",
+      "src": ["tag:openclaw-user"],
+      "dst": ["tag:openclaw-server:3000", "tag:openclaw-server:443"]
+    },
+    // 拒绝普通用户访问 SSH 和数据库端口
+    // （默认拒绝，无需显式配置）
+  ]
+}
+```
+
+## 八、与其他方案对比
+
+### Tailscale vs frp
+
+**frp（Fast Reverse Proxy）** 是国内常用的内网穿透方案：
+
+```
+frp 架构：
+客户端 -> 公网 frps 服务器 -> 内网 frpc 客户端 -> OpenClaw
+
+Tailscale 架构：
+客户端 <--> 直接 P2P 连接 <--> OpenClaw 服务器
+```
+
+| 维度 | Tailscale | frp |
+|------|-----------|-----|
+| 是否需要公网服务器 | 不需要 | 需要一台有公网 IP 的服务器 |
+| 运维成本 | 极低（SaaS 服务） | 需要自行维护 frps |
+| 带宽限制 | P2P 无限制 | 受限于公网服务器带宽 |
+| 安全性 | WireGuard 加密 | 需自行配置 TLS |
+| 延迟 | P2P 直连，极低 | 流量绕行公网服务器 |
+| 适合场景 | 个人/团队远程访问 | 需要暴露固定公网端口 |
+
+### Tailscale vs Cloudflare Tunnel
+
+| 维度 | Tailscale | Cloudflare Tunnel |
+|------|-----------|-------------------|
+| 工作方式 | Mesh VPN | 反向隧道代理 |
+| 访问方式 | 需安装客户端 | 浏览器直接访问 |
+| 是否需要域名 | 不需要 | 需要（且需托管在 CF） |
+| 适合场景 | 固定团队内部访问 | 需要对外公开服务 |
+| WebSocket 支持 | 原生支持 | 支持（需配置） |
+
+**选择建议**：
+
+- 如果是团队内部使用 OpenClaw，选 **Tailscale**（安全、简单、不暴露公网）
+- 如果需要对外提供 OpenClaw 服务（如 SaaS），选 **Cloudflare Tunnel**
+- 如果已有公网服务器且需要精细控制，选 **frp**
+
+## 九、高级配置技巧
+
+### Exit Node（出口节点）
+
+将服务器设为出口节点，所有流量通过服务器转发：
+
+```bash
+# 在服务器端
+sudo tailscale up --advertise-exit-node
+
+# 在客户端选择使用出口节点
+sudo tailscale up --exit-node=my-server
+```
+
+### Tailscale Funnel（公开服务）
+
+如果你希望不安装 Tailscale 的用户也能访问 OpenClaw：
+
+```bash
+# 在服务器端启用 Funnel
+sudo tailscale funnel 3000
+
+# 这会生成一个公开 URL：
+# https://my-server.mynet.ts.net/
+# 任何人都可以通过此 URL 访问
+```
+
+### 多节点高可用
+
+如果你有多台服务器运行 OpenClaw，可以结合 Tailscale 实现简单的高可用：
+
+```bash
+# 在所有 OpenClaw 节点上安装 Tailscale
+# 在客户端通过不同的 Tailscale IP 访问不同节点
+# 100.64.0.1:3000  -> 节点 A
+# 100.64.0.2:3000  -> 节点 B
+```
+
+## 总结
+
+Tailscale 为远程访问部署在内网中的 OpenClaw 提供了目前最简单、最安全的解决方案。通过本教程你已经掌握了：
+
+- Tailscale 的工作原理和核心优势
+- 在服务器和客户端上安装配置 Tailscale
+- 使用 MagicDNS 实现友好的域名访问
+- 通过子网路由访问整个内网
+- 使用 ACL 精细控制访问权限
+- 不同内网穿透方案的选型建议
+
+对于大多数个人和小团队用户，Tailscale 的免费计划已经完全足够日常使用。如果你还没有尝试过 Tailscale，强烈推荐花几分钟时间安装体验，你会发现远程访问 OpenClaw 变得前所未有的简单。

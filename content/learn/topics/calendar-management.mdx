@@ -1,0 +1,271 @@
+---
+title: "日程管理与智能提醒"
+description: "接入 Google Calendar / Outlook 日历，实现智能日程管理、冲突检测、会议准备自动化和跨时区协调"
+category: "效率工具篇"
+tags: ["日历", "日程管理", "提醒", "自动化"]
+date: "2026-02-08"
+---
+
+## 前言
+
+有效的日程管理是提升工作效率的关键。通过 OpenClaw 接入日历服务，你可以实现每日日程自动推送、会议智能准备、冲突检测提醒等自动化功能。
+
+## 一、日历服务接入
+
+### Google Calendar 接入
+
+```bash
+# 安装 Calendar Skill
+openclaw skill install calendar
+
+# 配置 Google Calendar（复用 Gmail 的 OAuth）
+openclaw calendar setup --provider google
+```
+
+配置文件：
+
+```yaml
+# ~/.openclaw/skills/calendar/config.yaml
+calendar:
+  provider: "google"  # google | outlook | caldav
+  auth:
+    credentials_path: "${HOME}/.openclaw/skills/gmail/credentials.json"
+    token_path: "${HOME}/.openclaw/skills/calendar/token.json"
+    scopes:
+      - "https://www.googleapis.com/auth/calendar.readonly"
+      - "https://www.googleapis.com/auth/calendar.events"
+
+  # 默认日历
+  default_calendar: "primary"
+
+  # 工作时间（用于冲突检测和建议）
+  working_hours:
+    start: "09:00"
+    end: "18:00"
+    timezone: "Asia/Shanghai"
+    workdays: [1, 2, 3, 4, 5]  # 周一到周五
+
+  # 提醒配置
+  reminders:
+    morning_brief: "08:30"
+    before_meeting: 10  # 会议前 10 分钟
+    channels: ["telegram"]
+```
+
+### Outlook 接入
+
+```yaml
+calendar:
+  provider: "outlook"
+  auth:
+    client_id: "${OUTLOOK_CLIENT_ID}"
+    client_secret: "${OUTLOOK_CLIENT_SECRET}"
+    tenant_id: "${OUTLOOK_TENANT_ID}"
+```
+
+## 二、每日日程提醒
+
+### 早间日程推送
+
+```yaml
+name: morning_schedule_brief
+schedule: "30 8 * * 1-5"  # 工作日早上 8:30
+steps:
+  - name: fetch_events
+    action: calendar.get_events
+    params:
+      date: "{{today}}"
+      calendar: "primary"
+
+  - name: format_brief
+    action: ai.format
+    prompt: |
+      根据今日日程生成简报：
+      {{events}}
+
+      格式要求：
+      📅 {{date}} 星期{{weekday}}
+
+      🕐 日程概览（共 X 个会议/事项）
+
+      按时间排列：
+      09:00-10:00 | 📌 会议名称
+        📍 地点/会议链接
+        👥 参会人
+        📝 一句话议程概要
+
+      ⚠️ 注意事项（如有冲突、连续会议等）
+
+      💡 今日建议（基于日程密度给出建议）
+
+  - name: push
+    action: telegram.send
+    params:
+      message: "{{formatted_brief}}"
+```
+
+### 会议前提醒
+
+```yaml
+name: meeting_reminder
+trigger: calendar.event_approaching
+params:
+  minutes_before: 10
+steps:
+  - name: prepare
+    action: ai.prepare
+    prompt: |
+      即将开始的会议：
+      名称：{{event.title}}
+      时间：{{event.start}} - {{event.end}}
+      参会人：{{event.attendees}}
+
+      请准备：
+      1. 参会人简介（从通讯录查询）
+      2. 上次与该参会人的沟通记录
+      3. 会议相关的近期邮件摘要
+      4. 建议的讨论要点
+
+  - name: notify
+    action: telegram.send
+    params:
+      message: |
+        ⏰ 会议提醒（10 分钟后开始）
+        📌 {{event.title}}
+        🔗 {{event.meeting_link}}
+
+        {{preparation_notes}}
+```
+
+## 三、智能冲突检测
+
+```yaml
+name: conflict_detector
+trigger: calendar.event_created
+steps:
+  - name: check_conflict
+    action: calendar.check_conflicts
+    params:
+      event: "{{new_event}}"
+      buffer_minutes: 15  # 会议间隔至少 15 分钟
+
+  - name: alert_if_conflict
+    condition: "{{has_conflict}}"
+    action: telegram.send
+    params:
+      message: |
+        ⚠️ 日程冲突检测
+
+        新事件：{{new_event.title}} ({{new_event.time}})
+        冲突事件：{{conflict_event.title}} ({{conflict_event.time}})
+
+        建议操作：
+        1. 调整新事件到 {{suggested_time}}
+        2. 将其中一个改为线上参加
+
+        回复 1 或 2 快速操作
+
+  - name: handle_response
+    action: wait_for_reply
+    timeout: "30m"
+```
+
+## 四、跨时区会议协调
+
+```yaml
+name: timezone_coordinator
+action: calendar.find_available_slot
+params:
+  participants:
+    - name: "张明"
+      timezone: "Asia/Shanghai"
+      calendar: "zhang.ming@company.com"
+    - name: "John"
+      timezone: "America/New_York"
+      calendar: "john@company.com"
+    - name: "Hans"
+      timezone: "Europe/Berlin"
+      calendar: "hans@company.com"
+
+  duration: 60  # 分钟
+  preferred_hours:
+    min: "09:00"
+    max: "18:00"
+  date_range:
+    start: "{{tomorrow}}"
+    end: "{{next_week}}"
+
+  output: |
+    找到以下可用时段：
+    {{#each available_slots}}
+    选项 {{index}}：
+      🇨🇳 北京时间：{{beijing_time}}
+      🇺🇸 纽约时间：{{ny_time}}
+      🇩🇪 柏林时间：{{berlin_time}}
+    {{/each}}
+```
+
+## 五、与 Notion 联动
+
+### 日程 → Notion 任务
+
+```yaml
+name: calendar_to_notion_sync
+trigger: calendar.event_created
+condition: "{{event.title}} contains '任务' or {{event.description}} contains 'TODO'"
+steps:
+  - name: create_task
+    action: notion.create_page
+    params:
+      database_id: "${TASK_DB}"
+      properties:
+        标题:
+          title: "{{event.title}}"
+        截止日期:
+          date:
+            start: "{{event.start}}"
+        状态:
+          status: "待办"
+        来源:
+          select: "日历"
+```
+
+### 定时日程总结
+
+```yaml
+name: weekly_calendar_review
+schedule: "0 18 * * 5"
+steps:
+  - name: fetch_week
+    action: calendar.get_events
+    params:
+      start: "{{week_start}}"
+      end: "{{week_end}}"
+
+  - name: analyze
+    action: ai.analyze
+    prompt: |
+      分析本周日程：
+      {{events}}
+
+      生成报告：
+      1. 会议统计（总数、总时长）
+      2. 时间分布（深度工作 vs 会议）
+      3. 效率建议（会议优化、时间块建议）
+
+  - name: save
+    action: notion.create_page
+    params:
+      database_id: "${WEEKLY_REVIEW_DB}"
+      content: "{{analysis}}"
+```
+
+## 六、效果数据
+
+| 指标 | 使用前 | 使用后 |
+|------|--------|--------|
+| 每日检查日历次数 | 5-8 次 | 0 次（自动推送） |
+| 会议迟到率 | 15% | 2% |
+| 日程冲突发现时间 | 到会时才知道 | 实时检测 |
+| 跨时区协调时间 | 30 分钟 | 1 分钟 |
+| 会议准备时间 | 15 分钟/场 | 0（自动准备） |

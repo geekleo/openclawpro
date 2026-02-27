@@ -69,9 +69,21 @@ export function getAllTopics() {
 export function getTopicBySlug(slug: string) {
   try {
     const { topics } = require("#site/content");
-    return topics.find((t: { slugAsParams: string }) => t.slugAsParams === slug);
+    // Match against the last segment of the slug path
+    return topics.find((t: { slug: string; slugAsParams: string }) =>
+      t.slug.split("/").pop() === slug || t.slugAsParams === slug
+    );
   } catch {
     return null;
+  }
+}
+
+export function getTopicSlugs(): string[] {
+  try {
+    const { topics } = require("#site/content");
+    return topics.map((t: { slug: string }) => t.slug.split("/").pop() as string);
+  } catch {
+    return [];
   }
 }
 

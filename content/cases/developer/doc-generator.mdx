@@ -1,0 +1,132 @@
+---
+title: "API 文档一键生成与同步"
+description: "后端团队使用 OpenClaw 从代码注释和 OpenAPI 规范自动生成 API 文档，实时同步到 Notion 和 Wiki，文档维护成本降低80%"
+category: "developer"
+tags: ["文档", "API", "自动生成", "Swagger"]
+metrics: "文档维护成本降低80%"
+---
+
+## 场景痛点
+
+赵阳是一家金融科技公司的后端架构师，团队维护着一套包含 6 个微服务、380+ 个 API 接口的核心系统。前端团队、移动端团队和第三方合作伙伴都依赖 API 文档进行开发。然而，API 文档的维护一直是团队的噩梦。
+
+**第一，文档永远滞后于代码。** 开发者修改了 API 的请求参数或返回结构后，很少会同步更新文档。据统计，380 个接口中有超过 120 个（约 32%）的文档与实际代码不一致。前端同事经常抱怨："照着文档调接口，返回的字段根本对不上。"
+
+**第二，文档格式混乱。** 由于没有统一的文档生成流程，不同模块的文档风格差异巨大。有的用 Swagger 注解，有的写在 Confluence 上，有的直接丢在项目 README 里，还有的……只存在于开发者的脑子里。新人入职想找某个接口的文档，经常要问三四个人才能找到。
+
+**第三，版本管理缺失。** API 经历了多次升级（v1、v2、v3），但文档只有最新版本。当合作伙伴询问旧版本 API 的行为时，没有任何地方可以查到。
+
+**第四，手动维护成本高。** 团队曾尝试指定专人维护文档，但一个人根本跟不上 12 个开发者的代码变更速度。每周投入 8 到 10 小时专门写文档，依然无法保证及时性和准确性。
+
+## 解决方案
+
+我们使用 OpenClaw 构建了一套"代码即文档"的自动化管线，实现了从代码变更到文档更新的完全自动化：
+
+**代码解析引擎**：OpenClaw 通过 GitHub Skill 监听主分支的代码合入事件。当检测到 API 相关文件（Controller、Router、DTO 等）发生变更时，自动拉取最新代码。解析引擎支持多种文档来源：OpenAPI/Swagger 注解（`@ApiOperation`、`@ApiParam` 等）、JSDoc/JavaDoc 代码注释、TypeScript 类型定义、Go 的 struct tag 和注释、以及 gRPC 的 proto 文件定义。
+
+**AI 文档增强**：原始解析结果往往只有参数名和类型，缺少业务语义的描述。OpenClaw 的 AI 模块会结合以下信息丰富文档内容：从参数命名推断业务含义（如 `order_id` 自动注释为"订单唯一标识"）、从代码逻辑分析参数的校验规则（如是否必填、长度限制、取值范围）、从测试用例提取请求和响应示例、自动生成错误码说明表。
+
+**Markdown 生成器**：将解析和增强后的信息按统一模板生成标准化 Markdown 文档。每个 API 的文档包含：接口路径和方法、功能描述、请求头说明、请求参数表（含类型、是否必填、说明）、响应结构表、请求和响应示例、错误码列表、变更历史记录。
+
+**多平台同步**：生成的文档自动同步到两个目标平台。内部使用 Notion 数据库（通过 Notion Skill），以服务和模块为维度组织页面结构；对外使用 VuePress 生成的静态文档站点，每次更新自动触发构建和部署。
+
+**版本控制**：文档与代码版本绑定。每次 API 变更时，OpenClaw 自动在文档中添加变更记录（时间、变更内容、关联 PR），并保留历史版本的文档快照。支持通过版本号查阅任何历史时期的 API 文档。
+
+## 关键配置
+
+```yaml
+name: "API 文档自动生成"
+trigger:
+  event: "push"
+  branches: ["main", "release/*"]
+  paths:
+    - "src/**/controller/**"
+    - "src/**/router/**"
+    - "src/**/dto/**"
+    - "proto/**"
+    - "openapi.yaml"
+
+skills:
+  - github:
+      token: "${GITHUB_TOKEN}"
+      repos:
+        - "company/user-service"
+        - "company/order-service"
+        - "company/payment-service"
+        - "company/notification-service"
+        - "company/merchant-service"
+        - "company/analytics-service"
+  - notion:
+      api_token: "${NOTION_API_TOKEN}"
+      workspace: "engineering-docs"
+
+parser_config:
+  languages:
+    java:
+      annotations: ["@RestController", "@RequestMapping", "@Api"]
+      dto_pattern: "**/dto/**/*.java"
+    typescript:
+      decorators: ["@Controller", "@Get", "@Post", "@Put", "@Delete"]
+      type_pattern: "**/types/**/*.ts"
+    go:
+      comment_style: "godoc"
+      handler_pattern: "**/handler/**/*.go"
+
+template: |
+  ## {method} {path}
+
+  **功能描述**：{description}
+  **认证方式**：{auth_type}
+  **版本**：{api_version}
+
+  ### 请求参数
+  | 参数名 | 类型 | 必填 | 说明 | 示例 |
+  |--------|------|------|------|------|
+  {params_table}
+
+  ### 响应结构
+  ```json
+  {response_example}
+  ```
+
+  ### 错误码
+  | 错误码 | 说明 | 处理建议 |
+  |--------|------|---------|
+  {error_codes}
+
+  ### 变更记录
+  {changelog}
+
+sync_targets:
+  notion:
+    structure: "按服务 > 模块 > 接口 三级页面组织"
+    update_mode: "incremental"
+  vuepress:
+    repo: "company/api-docs-site"
+    auto_deploy: true
+    deploy_branch: "gh-pages"
+
+versioning:
+  strategy: "tag-based"  # 基于 Git Tag 做版本快照
+  keep_versions: 5  # 保留最近5个版本的文档
+  diff_highlight: true  # 新版本文档中高亮显示变更部分
+```
+
+## 效果数据
+
+这套系统在 6 个微服务上全面部署后运行了 3 个月，效果显著：
+
+| 指标 | 改进前 | 改进后 | 变化幅度 |
+|------|--------|--------|---------|
+| 文档与代码一致率 | 68% | 99.2% | 提升 31.2% |
+| 文档更新延迟 | 平均 5 天 | 实时（代码合入后 3 分钟） | 从天级到分钟级 |
+| 每周文档维护时间 | 8-10 小时/人 | 1-2 小时/人 | 降低 80% |
+| 前端因文档问题的沟通次数 | 每周 15+ 次 | 每周 2 次 | 减少 87% |
+| 新人熟悉 API 时间 | 2 周 | 3 天 | 缩短 78% |
+| 文档覆盖率 | 72%（有的没文档） | 100% | 全覆盖 |
+
+最直观的变化来自前端团队的反馈。前端 Tech Lead 说："以前我们组有句口头禅叫'文档仅供参考，以接口实际返回为准'。现在这句话终于可以退休了。文档和代码是同一次 CI 生成的，准确性不用质疑。"
+
+另一个意外收获是在一次对外 API 开放的项目中，合作伙伴对文档质量赞不绝口："这是我见过最清晰的 API 文档，每个字段都有说明，还有完整的示例和错误码，集成效率比预期快了一倍。" 这次合作的对接周期从预估的 3 周缩短到了 10 天。
+
+赵阳正在计划下一步：增加 API 兼容性检测功能。当开发者提交的代码包含 Breaking Change（如删除字段、修改类型）时，OpenClaw 会自动标记并阻止合入，要求开发者先完成版本升级和迁移方案文档。

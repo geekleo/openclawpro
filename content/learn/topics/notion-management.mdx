@@ -1,0 +1,339 @@
+---
+title: "用 OpenClaw 管理 Notion 笔记"
+description: "通过 OpenClaw Notion Skill 实现笔记自动创建、知识库整理、日报周报模板化生成，打造你的第二大脑"
+category: "效率工具篇"
+tags: ["Notion", "知识管理", "笔记", "自动化"]
+date: "2026-02-10"
+---
+
+## 前言
+
+Notion 是目前最流行的全能型笔记和知识管理工具，而 OpenClaw 的 Notion Skill 可以让你通过自然语言或自动化工作流来操作 Notion，实现笔记自动创建、知识库智能整理、日报周报一键生成等功能。
+
+## 一、Notion API 密钥获取
+
+### 1. 创建 Integration
+
+1. 访问 [Notion Developers](https://developers.notion.com/)
+2. 点击「My Integrations」→「New Integration」
+3. 填写基本信息：
+   - **Name**: OpenClaw Integration
+   - **Associated workspace**: 选择你的工作区
+   - **Type**: Internal
+4. 点击「Submit」，复制生成的 **Internal Integration Secret**
+
+### 2. 授权数据库访问
+
+这是最容易遗漏的步骤！你需要手动将 Integration 连接到需要操作的页面或数据库：
+
+1. 打开目标 Notion 页面或数据库
+2. 点击右上角「...」菜单
+3. 选择「添加连接」（Add connections）
+4. 搜索并选择你创建的 Integration
+5. 确认授权
+
+> 每个需要 OpenClaw 访问的页面/数据库都需要单独授权。
+
+## 二、安装配置 Notion Skill
+
+```bash
+# 安装 Notion Skill
+openclaw skill install notion
+
+# 配置 API Key
+openclaw config set notion.api_key "secret_xxxxxxxxxxxxx"
+
+# 验证连接
+openclaw notion test
+```
+
+配置文件 `~/.openclaw/skills/notion/config.yaml`：
+
+```yaml
+notion:
+  api_key: "${NOTION_API_KEY}"
+  default_database: "your-database-id"
+  templates:
+    daily_report: "template-page-id"
+    weekly_report: "template-page-id"
+    meeting_notes: "template-page-id"
+  auto_tag: true
+  language: "zh-CN"
+```
+
+## 三、核心操作
+
+### 1. 创建页面
+
+```yaml
+# 在指定数据库中创建页面
+action: notion.create_page
+params:
+  database_id: "abc123"
+  properties:
+    标题:
+      title: "每日学习笔记 - 2026-02-10"
+    分类:
+      select: "学习笔记"
+    标签:
+      multi_select: ["OpenClaw", "AI", "自动化"]
+    状态:
+      status: "进行中"
+  content: |
+    ## 今日学习内容
+    - OpenClaw Notion Skill 配置
+    - 自动化工作流搭建
+
+    ## 关键收获
+    - Notion API 的认证机制
+    - 数据库属性的操作方法
+```
+
+### 2. 查询和搜索
+
+```yaml
+# 搜索笔记
+action: notion.search
+params:
+  query: "OpenClaw 部署"
+  filter:
+    property: "分类"
+    select:
+      equals: "技术笔记"
+  sort:
+    timestamp: "last_edited_time"
+    direction: "descending"
+  page_size: 10
+```
+
+### 3. 更新页面属性
+
+```yaml
+action: notion.update_page
+params:
+  page_id: "page-id-here"
+  properties:
+    状态:
+      status: "已完成"
+    完成日期:
+      date:
+        start: "2026-02-10"
+```
+
+## 四、自动化知识整理工作流
+
+### 日报自动生成
+
+每天下午 6 点自动生成日报：
+
+```yaml
+name: daily_report_to_notion
+schedule: "0 18 * * 1-5"  # 周一到周五 18:00
+steps:
+  - name: collect_data
+    action: aggregate
+    sources:
+      - git_commits_today
+      - calendar_events_today
+      - completed_tasks_today
+
+  - name: generate_report
+    action: ai.summarize
+    prompt: |
+      根据以下数据生成今日工作日报：
+      - Git 提交: {{git_commits}}
+      - 会议: {{calendar_events}}
+      - 完成任务: {{completed_tasks}}
+
+      格式要求：
+      1. 今日完成（3-5 条）
+      2. 进行中（列出未完成项）
+      3. 明日计划（基于未完成项推断）
+
+  - name: create_notion_page
+    action: notion.create_page
+    params:
+      database_id: "${DAILY_REPORT_DB}"
+      properties:
+        标题:
+          title: "日报 - {{date}}"
+        日期:
+          date:
+            start: "{{date}}"
+      content: "{{generated_report}}"
+
+  - name: notify
+    action: telegram.send
+    params:
+      message: "📝 今日日报已自动生成：{{notion_url}}"
+```
+
+### 周报自动汇总
+
+```yaml
+name: weekly_report
+schedule: "0 17 * * 5"  # 每周五 17:00
+steps:
+  - name: fetch_daily_reports
+    action: notion.query_database
+    params:
+      database_id: "${DAILY_REPORT_DB}"
+      filter:
+        and:
+          - property: "日期"
+            date:
+              on_or_after: "{{week_start}}"
+          - property: "日期"
+            date:
+              on_or_before: "{{week_end}}"
+
+  - name: summarize
+    action: ai.summarize
+    prompt: |
+      汇总本周 5 天的日报，生成周报：
+      {{daily_reports}}
+
+      周报格式：
+      1. 本周重点成果
+      2. 关键数据指标
+      3. 遇到的问题和解决方案
+      4. 下周计划
+
+  - name: create_weekly_page
+    action: notion.create_page
+    params:
+      database_id: "${WEEKLY_REPORT_DB}"
+      content: "{{weekly_summary}}"
+```
+
+### 会议纪要自动记录
+
+```yaml
+name: meeting_notes
+trigger: calendar.event_end
+steps:
+  - name: transcribe
+    action: tts.transcribe
+    params:
+      audio_url: "{{meeting_recording_url}}"
+
+  - name: summarize
+    action: ai.summarize
+    prompt: |
+      根据会议录音转写内容生成会议纪要：
+      {{transcription}}
+
+      格式：参会人员、讨论要点、决议事项、Action Items（负责人+截止日期）
+
+  - name: save_to_notion
+    action: notion.create_page
+    params:
+      database_id: "${MEETING_NOTES_DB}"
+      properties:
+        标题:
+          title: "{{meeting_title}} - 会议纪要"
+        日期:
+          date:
+            start: "{{meeting_date}}"
+        参会人:
+          multi_select: "{{attendees}}"
+      content: "{{meeting_summary}}"
+```
+
+## 五、与其他 Skill 联动
+
+### RSS → Notion 知识库
+
+```yaml
+name: rss_to_notion
+schedule: "0 8 * * *"
+steps:
+  - name: fetch_rss
+    action: rss.fetch
+    params:
+      feeds:
+        - "https://example.com/feed.xml"
+      since: "24h"
+
+  - name: summarize_articles
+    action: ai.batch_summarize
+    params:
+      items: "{{rss_items}}"
+      prompt: "用 3-5 句话总结文章要点，提取关键标签"
+
+  - name: save_to_notion
+    action: notion.batch_create
+    params:
+      database_id: "${READING_DB}"
+      items: "{{summarized_articles}}"
+      mapping:
+        标题: "{{title}}"
+        来源: "{{source}}"
+        摘要: "{{summary}}"
+        标签: "{{auto_tags}}"
+        链接: "{{url}}"
+```
+
+### 邮件 → Notion
+
+```yaml
+name: email_to_notion
+trigger: gmail.important_email
+steps:
+  - name: extract
+    action: ai.extract
+    params:
+      content: "{{email_body}}"
+      fields: ["主题", "要点", "待办事项", "截止日期"]
+
+  - name: create_task
+    action: notion.create_page
+    params:
+      database_id: "${TASK_DB}"
+      properties:
+        标题:
+          title: "邮件待办：{{subject}}"
+        来源:
+          select: "邮件"
+      content: "{{extracted_content}}"
+```
+
+## 六、实战案例：构建个人知识库
+
+### 数据库设计
+
+建议创建以下 Notion 数据库：
+
+| 数据库 | 用途 | 关键属性 |
+|--------|------|---------|
+| 阅读清单 | 收集文章/书籍 | 标题、来源、分类、评分、摘要 |
+| 学习笔记 | 记录学习内容 | 标题、主题、日期、标签 |
+| 项目记录 | 项目进展跟踪 | 项目名、状态、负责人、截止日期 |
+| 灵感收集 | 记录想法 | 内容、场景、关联项目 |
+
+### 自动化流程
+
+1. **输入层**：RSS、邮件、微信消息自动收集到「阅读清单」
+2. **处理层**：AI 自动摘要、分类、打标签
+3. **整理层**：每周自动生成知识图谱和学习报告
+4. **输出层**：自动关联到相关项目和笔记
+
+### 效果数据
+
+| 指标 | 自动化前 | 自动化后 |
+|------|---------|---------|
+| 每日整理时间 | 45 分钟 | 5 分钟（审核） |
+| 月处理文章数 | 50 篇 | 300+ 篇 |
+| 知识检索效率 | 翻找 10 分钟 | 搜索 10 秒 |
+| 日报生成时间 | 20 分钟 | 0（自动） |
+
+## 常见问题
+
+**Q: 提示 API Key 无效？**
+确认已在目标页面/数据库中添加 Integration 连接（右上角 ... → 添加连接）。
+
+**Q: 数据库属性类型报错？**
+Notion API 对属性类型有严格要求，确保配置中的属性名称和类型与数据库完全一致。
+
+**Q: 内容格式不正确？**
+Notion API 使用 Block 格式，OpenClaw 的 Notion Skill 会自动转换 Markdown 到 Notion Block，但复杂格式可能需要手动调整。

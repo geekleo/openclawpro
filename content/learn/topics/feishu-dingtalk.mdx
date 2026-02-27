@@ -1,0 +1,621 @@
+---
+title: "飞书/钉钉集成方案"
+description: "详解 OpenClaw 与飞书和钉钉的集成方案，涵盖自定义应用创建、消息推送、交互卡片、审批日程集成、群机器人及两平台方案对比与企业最佳实践"
+category: "消息平台篇"
+tags: ["飞书", "钉钉", "企业通讯", "自动化"]
+date: "2026-02-20"
+---
+
+## 前言
+
+飞书（Lark）和钉钉（DingTalk）是国内企业最主流的两大办公协作平台，覆盖了大量中国企业用户。将 OpenClaw 与飞书或钉钉集成，可以让 AI Agent 能力直接融入企业的日常办公流程，实现智能消息通知、自动审批处理、日程管理等丰富功能。
+
+本教程将分别介绍飞书和钉钉的完整集成方案，并在最后进行两平台的横向对比，帮助你根据实际情况做出最佳选择。
+
+---
+
+## 飞书篇
+
+---
+
+## 一、飞书自定义应用创建
+
+### 步骤 1：注册飞书开放平台
+
+1. 访问 [飞书开放平台](https://open.feishu.cn/)
+2. 使用飞书账号登录（需要管理员权限或开发者权限）
+3. 进入「开发者后台」
+
+### 步骤 2：创建自定义应用
+
+1. 点击「创建企业自建应用」
+2. 填写应用信息：
+   - 应用名称：OpenClaw 智能助手
+   - 应用描述：基于 OpenClaw 的 AI Agent 智能助手
+   - 应用图标：上传图标
+3. 创建完成后进入应用管理页面
+
+### 步骤 3：获取凭证
+
+在「凭证与基础信息」页面中获取：
+
+```
+App ID: cli_xxxxxxxxxxxxxxxxx
+App Secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 步骤 4：配置应用能力
+
+在「添加应用能力」中启用以下功能：
+
+1. **机器人**：在群组和私聊中使用 Bot
+2. **网页应用**（可选）：提供 OpenClaw 的 Web 界面入口
+3. **小程序**（可选）：移动端轻量入口
+
+### 步骤 5：配置事件订阅
+
+1. 进入「事件订阅」页面
+2. 设置请求地址：`https://openclaw.yourdomain.com/api/feishu/webhook`
+3. 添加需要订阅的事件：
+   - `im.message.receive_v1`：接收消息
+   - `im.chat.member.bot.added_v1`：Bot 被添加到群
+   - `im.chat.member.bot.deleted_v1`：Bot 被移除
+4. 保存并等待飞书验证回调地址
+
+### 步骤 6：申请权限并发布
+
+1. 在「权限管理」中申请所需权限：
+   - `im:message`：发送消息
+   - `im:message.group_at_msg`：接收群 @Bot 消息
+   - `im:chat`：获取群信息
+   - `contact:user.base`：获取用户基本信息
+2. 在「版本管理与发布」中创建版本并提交发布
+3. 管理员在飞书管理后台审批并上线
+
+### 在 OpenClaw 中配置
+
+```env
+# .env 配置
+FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxxx
+FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+FEISHU_VERIFICATION_TOKEN=your-verification-token
+FEISHU_ENCRYPT_KEY=your-encrypt-key
+```
+
+## 二、飞书消息推送和交互卡片
+
+### 获取 Tenant Access Token
+
+```bash
+# 飞书 API 使用 Tenant Access Token 鉴权
+curl -X POST "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "app_id": "cli_xxxxxxxxxxxxxxxxx",
+    "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }'
+
+# 返回
+# {"code": 0, "tenant_access_token": "t-xxxxxx", "expire": 7200}
+```
+
+### 发送文本消息
+
+```bash
+# 发送消息给用户
+curl -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id" \
+  -H "Authorization: Bearer t-xxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "receive_id": "ou_xxxxxx",
+    "msg_type": "text",
+    "content": "{\"text\": \"这是来自 OpenClaw 的消息通知\"}"
+  }'
+```
+
+### 发送富文本消息
+
+```bash
+curl -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
+  -H "Authorization: Bearer t-xxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "receive_id": "oc_xxxxxx",
+    "msg_type": "post",
+    "content": "{\"zh_cn\": {\"title\": \"OpenClaw 任务报告\", \"content\": [[{\"tag\": \"text\", \"text\": \"任务名称: \"}, {\"tag\": \"text\", \"text\": \"数据分析\", \"style\": [\"bold\"]}, {\"tag\": \"text\", \"text\": \"\\n状态: \"}, {\"tag\": \"text\", \"text\": \"已完成\", \"style\": [\"bold\"]}], [{\"tag\": \"a\", \"text\": \"查看详情\", \"href\": \"https://openclaw.yourdomain.com/tasks/123\"}]]}}"
+  }'
+```
+
+### 交互卡片（Message Card）
+
+飞书的交互卡片是其最强大的消息特性之一，支持丰富的布局和交互组件。
+
+```bash
+curl -X POST "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id" \
+  -H "Authorization: Bearer t-xxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "receive_id": "oc_xxxxxx",
+    "msg_type": "interactive",
+    "content": "{\"config\": {\"wide_screen_mode\": true}, \"header\": {\"title\": {\"tag\": \"plain_text\", \"content\": \"OpenClaw AI 助手\"}, \"template\": \"blue\"}, \"elements\": [{\"tag\": \"div\", \"text\": {\"tag\": \"lark_md\", \"content\": \"**任务执行完成**\\n\\n任务 ID: #1234\\n执行时长: 3 分 25 秒\\n状态: 成功\"}}, {\"tag\": \"action\", \"actions\": [{\"tag\": \"button\", \"text\": {\"tag\": \"plain_text\", \"content\": \"查看详情\"}, \"type\": \"primary\", \"url\": \"https://openclaw.yourdomain.com/tasks/1234\"}, {\"tag\": \"button\", \"text\": {\"tag\": \"plain_text\", \"content\": \"重新执行\"}, \"type\": \"default\", \"value\": {\"action\": \"rerun\", \"task_id\": \"1234\"}}]}]}"
+  }'
+```
+
+### 在 OpenClaw 中使用卡片模板
+
+```yaml
+# OpenClaw Flow：发送交互卡片
+name: feishu-task-card
+trigger:
+  type: task_completed
+
+steps:
+  - name: send-card
+    skill: feishu-send-card
+    params:
+      chat_id: "{{env.FEISHU_NOTIFICATION_CHAT_ID}}"
+      card:
+        header:
+          title: "任务完成通知"
+          template: "green"
+        elements:
+          - tag: div
+            text:
+              tag: lark_md
+              content: |
+                **{{trigger.task_name}}**
+                执行时长: {{trigger.duration}}
+                结果摘要: {{trigger.result_summary}}
+          - tag: action
+            actions:
+              - tag: button
+                text: "查看详情"
+                type: primary
+                url: "https://openclaw.yourdomain.com/tasks/{{trigger.task_id}}"
+              - tag: button
+                text: "重新执行"
+                type: default
+                value:
+                  action: rerun
+                  task_id: "{{trigger.task_id}}"
+```
+
+### 处理卡片回调
+
+```yaml
+# 处理用户点击卡片按钮的回调
+name: feishu-card-callback
+trigger:
+  type: feishu_card_action
+
+steps:
+  - name: handle-action
+    skill: condition-router
+    params:
+      value: "{{trigger.action.value.action}}"
+      routes:
+        rerun: rerun-task
+        approve: approve-task
+        reject: reject-task
+
+  - name: rerun-task
+    skill: openclaw-api
+    params:
+      endpoint: "/api/tasks/{{trigger.action.value.task_id}}/rerun"
+      method: POST
+    condition: "{{steps.handle-action.output == 'rerun-task'}}"
+```
+
+## 三、飞书审批和日程集成
+
+### 审批集成
+
+飞书提供了完善的审批 API，可以与 OpenClaw 结合实现审批自动化。
+
+```yaml
+# 监听审批状态变化
+name: feishu-approval-handler
+trigger:
+  type: feishu_event
+  event: approval_instance
+
+steps:
+  - name: get-approval-detail
+    skill: feishu-api
+    params:
+      endpoint: "/open-apis/approval/v4/instances/{{trigger.instance_code}}"
+      method: GET
+
+  - name: ai-analyze
+    skill: openai-chat
+    params:
+      model: gpt-4
+      system_prompt: "分析审批申请内容，给出建议。"
+      user_message: "{{steps.get-approval-detail.output}}"
+
+  - name: notify-approver
+    skill: feishu-send
+    params:
+      receive_id: "{{steps.get-approval-detail.output.approver_open_id}}"
+      content: |
+        你有一个新的审批待处理：
+        {{steps.get-approval-detail.output.summary}}
+
+        AI 分析建议：
+        {{steps.ai-analyze.output}}
+```
+
+### 日程集成
+
+```yaml
+# 自动创建日程提醒
+name: feishu-create-calendar-event
+trigger:
+  type: openclaw_task_scheduled
+
+steps:
+  - name: create-event
+    skill: feishu-api
+    params:
+      endpoint: "/open-apis/calendar/v4/calendars/{{env.FEISHU_CALENDAR_ID}}/events"
+      method: POST
+      body:
+        summary: "OpenClaw 任务: {{trigger.task_name}}"
+        description: "{{trigger.task_description}}"
+        start_time:
+          timestamp: "{{trigger.scheduled_time}}"
+        end_time:
+          timestamp: "{{trigger.scheduled_time + 3600}}"
+        reminders:
+          - minutes: 15
+```
+
+---
+
+## 钉钉篇
+
+---
+
+## 四、钉钉企业内部应用
+
+### 步骤 1：进入钉钉开放平台
+
+1. 访问 [钉钉开放平台](https://open-dev.dingtalk.com/)
+2. 使用管理员账号登录
+3. 进入「应用开发」
+
+### 步骤 2：创建企业内部应用
+
+1. 点击「创建应用」
+2. 选择「企业内部开发」->「H5 微应用」或「机器人」
+3. 填写应用信息：
+   - 应用名称：OpenClaw 智能助手
+   - 应用描述：基于 OpenClaw 的 AI Agent 平台
+   - 应用图标：上传图标
+4. 创建完成后获取凭证：
+
+```
+AppKey: dingxxxxxxxxxxxxxxxxx
+AppSecret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 步骤 3：配置机器人
+
+1. 在应用设置中，进入「机器人」选项
+2. 开启机器人功能
+3. 设置消息接收地址：`https://openclaw.yourdomain.com/api/dingtalk/callback`
+4. 配置出口 IP（钉钉要求配置服务器公网 IP 白名单）
+
+### 步骤 4：权限配置
+
+在「权限管理」中申请：
+
+- 通讯录管理权限：读取员工信息
+- 消息通知权限：发送工作通知
+- 群消息权限：在群中发送消息
+
+### 在 OpenClaw 中配置
+
+```env
+# .env 配置
+DINGTALK_APP_KEY=dingxxxxxxxxxxxxxxxxx
+DINGTALK_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DINGTALK_AGENT_ID=1234567890
+DINGTALK_ROBOT_CODE=dingxxxxxxxxxxxxxxxxx
+```
+
+### 获取 Access Token
+
+```bash
+curl -X POST "https://oapi.dingtalk.com/gettoken?appkey=APP_KEY&appsecret=APP_SECRET"
+
+# 返回
+# {"errcode": 0, "access_token": "xxxxxx", "errmsg": "ok", "expires_in": 7200}
+```
+
+## 五、钉钉群机器人配置
+
+钉钉群机器人是最快速的集成方式，支持自定义 Webhook 和关键词安全设置。
+
+### 创建群机器人
+
+1. 在钉钉群聊中，点击右上角设置 ->「智能群助手」->「添加机器人」
+2. 选择「自定义（通过 Webhook 接入自定义服务）」
+3. 填写机器人名称和头像
+4. 安全设置（三选一）：
+   - **自定义关键词**：消息中必须包含指定关键词
+   - **加签**：使用 Secret 进行签名验证（推荐）
+   - **IP 地址段**：限制发送消息的服务器 IP
+5. 完成后获取 Webhook 地址和 Secret
+
+```
+Webhook: https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxxxxxxxxxxxxxxxxx
+Secret: SECxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+### 发送消息（加签模式）
+
+```python
+# 计算签名的示例代码
+import time
+import hmac
+import hashlib
+import base64
+import urllib.parse
+
+timestamp = str(round(time.time() * 1000))
+secret = 'SECxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+secret_enc = secret.encode('utf-8')
+string_to_sign = '{}\n{}'.format(timestamp, secret)
+string_to_sign_enc = string_to_sign.encode('utf-8')
+hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
+sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
+
+# 最终请求 URL
+url = f"https://oapi.dingtalk.com/robot/send?access_token=TOKEN&timestamp={timestamp}&sign={sign}"
+```
+
+```bash
+# 发送文本消息
+curl -X POST "https://oapi.dingtalk.com/robot/send?access_token=TOKEN&timestamp=TIMESTAMP&sign=SIGN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "msgtype": "text",
+    "text": {
+      "content": "OpenClaw 通知：任务执行完成"
+    },
+    "at": {
+      "atMobiles": ["13800138000"],
+      "isAtAll": false
+    }
+  }'
+
+# 发送 Markdown 消息
+curl -X POST "https://oapi.dingtalk.com/robot/send?access_token=TOKEN&timestamp=TIMESTAMP&sign=SIGN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "msgtype": "markdown",
+    "markdown": {
+      "title": "OpenClaw 任务报告",
+      "text": "## 任务执行报告\n\n> 任务名称: 数据分析\n\n- **状态**: 成功\n- **耗时**: 3 分 25 秒\n- **结果**: [查看详情](https://openclaw.yourdomain.com/tasks/123)\n\n![截图](https://example.com/screenshot.png)"
+    }
+  }'
+
+# 发送 ActionCard 消息
+curl -X POST "https://oapi.dingtalk.com/robot/send?access_token=TOKEN&timestamp=TIMESTAMP&sign=SIGN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "msgtype": "actionCard",
+    "actionCard": {
+      "title": "OpenClaw 审批通知",
+      "text": "## 审批请求\n\n申请人: 张三\n申请类型: 请假\n请假天数: 3 天\n\n请及时处理。",
+      "btnOrientation": "0",
+      "btns": [
+        {"title": "同意", "actionURL": "https://openclaw.yourdomain.com/approve/123?action=approve"},
+        {"title": "拒绝", "actionURL": "https://openclaw.yourdomain.com/approve/123?action=reject"}
+      ]
+    }
+  }'
+```
+
+## 六、钉钉工作通知推送
+
+工作通知是钉钉企业应用的核心消息通道，通过应用向员工推送消息。
+
+```bash
+# 发送工作通知
+curl -X POST "https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": 1234567890,
+    "userid_list": "user001,user002",
+    "msg": {
+      "msgtype": "oa",
+      "oa": {
+        "head": {
+          "bgcolor": "FFBBBBBB",
+          "text": "OpenClaw 通知"
+        },
+        "body": {
+          "title": "任务执行报告",
+          "form": [
+            {"key": "任务名称:", "value": "数据分析"},
+            {"key": "执行状态:", "value": "成功"},
+            {"key": "执行时长:", "value": "3 分 25 秒"}
+          ],
+          "content": "任务已成功完成，点击查看详细报告。",
+          "author": "OpenClaw Agent"
+        }
+      }
+    }
+  }'
+```
+
+在 OpenClaw 中配置工作通知推送：
+
+```yaml
+# 定时推送周报
+name: dingtalk-weekly-report
+trigger:
+  type: schedule
+  cron: "0 17 * * 5"  # 每周五下午 5 点
+
+steps:
+  - name: generate-report
+    skill: openai-chat
+    params:
+      model: gpt-4
+      user_message: "根据本周的任务执行数据生成周报"
+
+  - name: send-notification
+    skill: dingtalk-work-notice
+    params:
+      agent_id: "{{env.DINGTALK_AGENT_ID}}"
+      userid_list: "@all"
+      msg_type: markdown
+      title: "本周 OpenClaw 使用报告"
+      content: "{{steps.generate-report.output}}"
+```
+
+## 七、两平台方案对比
+
+### 功能对比
+
+| 功能维度 | 飞书 | 钉钉 |
+|---------|------|------|
+| 开放平台成熟度 | 高 | 高 |
+| Bot API 丰富度 | 非常丰富 | 丰富 |
+| 交互卡片 | 强大（Message Card） | 一般（ActionCard） |
+| 审批集成 | 完善 | 完善 |
+| 日程集成 | 完善 | 较完善 |
+| 文档集成 | 优秀（飞书文档 API） | 一般 |
+| Webhook 机器人 | 支持 | 支持 |
+| 消息类型 | 丰富（文本、富文本、卡片等） | 丰富（文本、Markdown、ActionCard 等） |
+
+### 开发体验对比
+
+| 维度 | 飞书 | 钉钉 |
+|------|------|------|
+| API 文档质量 | 优秀 | 良好 |
+| SDK 支持 | 官方多语言 SDK | 官方多语言 SDK |
+| 调试工具 | API Explorer + 事件模拟 | API Explorer |
+| 错误信息 | 清晰详细 | 有时不够明确 |
+| 社区生态 | 活跃 | 活跃 |
+| 更新频率 | 频繁 | 频繁 |
+
+### 适用场景建议
+
+| 场景 | 推荐平台 | 原因 |
+|------|---------|------|
+| 科技/互联网公司 | 飞书 | 开发者体验好，文档集成强 |
+| 传统企业/政企 | 钉钉 | 市场占有率高，审批流程完善 |
+| 需要丰富交互卡片 | 飞书 | Message Card 功能更强大 |
+| 需要 HR/OA 集成 | 钉钉 | OA 生态更成熟 |
+| 国际化团队 | 飞书（Lark） | 国际版支持好 |
+
+## 八、企业场景最佳实践
+
+### 统一消息网关
+
+如果企业同时使用飞书和钉钉，建议通过 OpenClaw 构建统一的消息网关：
+
+```yaml
+# 统一消息发送接口
+name: unified-notification
+trigger:
+  type: openclaw_event
+  event: notification
+
+steps:
+  - name: send-feishu
+    skill: feishu-send
+    params:
+      receive_id: "{{trigger.feishu_chat_id}}"
+      content: "{{trigger.message}}"
+    condition: "{{trigger.feishu_chat_id != null}}"
+
+  - name: send-dingtalk
+    skill: dingtalk-send
+    params:
+      webhook_url: "{{trigger.dingtalk_webhook}}"
+      content: "{{trigger.message}}"
+    condition: "{{trigger.dingtalk_webhook != null}}"
+```
+
+### 监控告警联动
+
+```yaml
+# 系统监控告警同时推送到飞书和钉钉
+name: multi-platform-alert
+trigger:
+  type: schedule
+  cron: "*/5 * * * *"
+
+steps:
+  - name: check-health
+    skill: http-request
+    params:
+      url: "http://localhost:3000/health"
+
+  - name: alert-feishu
+    skill: feishu-send-card
+    params:
+      chat_id: "{{env.FEISHU_ALERT_CHAT_ID}}"
+      card:
+        header:
+          title: "服务异常告警"
+          template: "red"
+        elements:
+          - tag: div
+            text:
+              tag: lark_md
+              content: "OpenClaw 服务不可用，请立即排查！"
+    condition: "{{steps.check-health.status != 200}}"
+
+  - name: alert-dingtalk
+    skill: dingtalk-webhook
+    params:
+      webhook_url: "{{env.DINGTALK_ALERT_WEBHOOK}}"
+      msgtype: markdown
+      title: "服务异常告警"
+      content: "## 服务异常告警\n\nOpenClaw 服务不可用，请立即排查！"
+    condition: "{{steps.check-health.status != 200}}"
+```
+
+### 安全配置清单
+
+无论使用飞书还是钉钉，都需要注意以下安全事项：
+
+1. **凭证管理**：App Secret 等敏感信息必须通过环境变量管理，不要硬编码
+2. **IP 白名单**：在开放平台中限制 API 调用的 IP 范围
+3. **消息加密**：启用消息加密传输（飞书的 Encrypt Key、钉钉的加签模式）
+4. **权限最小化**：只申请必要的 API 权限
+5. **日志审计**：记录所有 API 调用日志，便于安全审计
+6. **频率控制**：遵守平台 API 调用频率限制，避免被封禁
+
+```env
+# 安全配置示例
+FEISHU_ENCRYPT_KEY=your-encrypt-key      # 飞书消息加密密钥
+DINGTALK_SECRET=SECxxxxxxxxxxxxxxxx       # 钉钉加签密钥
+```
+
+## 总结
+
+通过本教程，你已经全面掌握了 OpenClaw 与飞书和钉钉的集成方案：
+
+**飞书部分：**
+- 自定义应用的完整创建流程
+- 消息推送和交互卡片的使用
+- 审批和日程集成的配置方法
+
+**钉钉部分：**
+- 企业内部应用和群机器人的创建
+- 多种消息类型的发送方式
+- 工作通知推送的配置
+
+**综合：**
+- 两平台的功能和体验对比
+- 统一消息网关的架构设计
+- 企业安全配置最佳实践
+
+无论你的企业使用飞书还是钉钉，OpenClaw 都能通过灵活的 Skill 配置与之无缝对接。选择适合你企业实际情况的平台，将 AI Agent 的能力融入日常办公流程，提升团队整体效率。

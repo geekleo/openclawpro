@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { getCasesByCategory } from "@/lib/content";
 import type { Metadata } from "next";
 
 interface PageProps {
@@ -26,6 +27,7 @@ export function generateMetadata({ params }: PageProps): Metadata {
 
 export default function CaseCategoryPage({ params }: PageProps) {
   const info = categoryInfo[params.category] || { title: params.category, icon: "📋", description: "" };
+  const cases = getCasesByCategory(params.category);
 
   return (
     <div className="container py-12 md:py-16">
@@ -42,18 +44,35 @@ export default function CaseCategoryPage({ params }: PageProps) {
       </div>
 
       <div className="max-w-3xl mx-auto space-y-6">
-        <Card>
-          <CardHeader>
-            <Badge variant="secondary" className="w-fit mb-2">案例</Badge>
-            <CardTitle>示例案例</CardTitle>
-            <CardDescription>
-              这是一个示例案例，完整内容即将发布。每个案例包含：场景痛点、解决方案、关键配置、效果数据。
-            </CardDescription>
-          </CardHeader>
-        </Card>
+        {cases.length > 0 ? (
+          cases.map((c: { slug: string; title: string; description: string; metrics?: string; tags?: string[] }) => (
+            <Card key={c.slug} className="transition-colors hover:border-primary/50">
+              <CardHeader>
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant="secondary">案例</Badge>
+                  {c.metrics && <Badge variant="outline">{c.metrics}</Badge>}
+                </div>
+                <CardTitle className="text-lg">{c.title}</CardTitle>
+                <CardDescription>{c.description}</CardDescription>
+                {c.tags && (
+                  <div className="flex gap-1.5 mt-2">
+                    {c.tags.map((tag) => (
+                      <span key={tag} className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </CardHeader>
+            </Card>
+          ))
+        ) : (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground mb-4">案例正在整理中</p>
+          </div>
+        )}
 
-        <div className="text-center py-8">
-          <p className="text-muted-foreground mb-4">更多案例即将发布</p>
+        <div className="text-center pt-4">
           <Button asChild variant="outline">
             <Link href="/courses">想获取完整配置？查看课程 →</Link>
           </Button>

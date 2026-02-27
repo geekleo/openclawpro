@@ -1,0 +1,828 @@
+---
+title: "数据备份与跨平台迁移"
+description: "系统性讲解 OpenClaw 的数据备份策略设计（3-2-1 规则）、自动化定时备份、Docker Volume 备份、数据库备份恢复、跨服务器迁移、Docker 到 Kubernetes 迁移、备份验证与恢复演练、云存储备份（阿里云 OSS 与 AWS S3）以及灾难恢复计划"
+category: "安全与运维篇"
+tags: ["备份", "迁移", "数据安全", "运维"]
+date: "2026-02-01"
+---
+
+## 备份策略设计
+
+数据备份是系统运维的生命线。一个经过深思熟虑的备份策略能在灾难发生时让你从容应对，而缺乏备份策略则可能导致不可逆的数据丢失。
+
+### 3-2-1 备份规则
+
+3-2-1 规则是业界公认的数据备份黄金准则：
+
+```
+3-2-1 规则详解：
+
+  3 份数据副本
+  ├── 1 份生产数据（正在使用的）
+  ├── 1 份本地备份（同机房 / 同服务器其他磁盘）
+  └── 1 份异地备份（不同地理位置 / 云存储）
+
+  2 种存储介质
+  ├── 本地磁盘 / SSD
+  └── 云对象存储（OSS / S3）
+
+  1 份异地备份
+  └── 确保即使本地机房整体故障，仍有可用备份
+```
+
+### OpenClaw 需要备份的数据
+
+| 数据类型 | 位置 | 重要程度 | 备份频率 |
+|---------|------|---------|---------|
+| 数据库（PostgreSQL） | Docker Volume | 关键 | 每小时增量 / 每日全量 |
+| 配置文件 | `./config/` | 关键 | 每次变更后 |
+| 对话历史 | 数据库 + 文件 | 重要 | 每日 |
+| Skill / 插件 | `./skills/` | 重要 | 每次变更后 |
+| 上传文件 | `./data/uploads/` | 一般 | 每日 |
+| 日志文件 | `./logs/` | 一般 | 每周归档 |
+| SSL 证书 | `/etc/letsencrypt/` | 关键 | 每次续签后 |
+| 环境变量 | `.env` | 关键 | 每次变更后（加密存储） |
+
+## 自动化定时备份
+
+### 完整备份脚本
+
+以下是一个生产级别的自动化备份脚本，涵盖了 OpenClaw 所有关键数据的备份：
+
+```bash
+#!/bin/bash
+# openclaw-backup.sh - OpenClaw 自动化备份脚本
+# 用法: ./openclaw-backup.sh [full|incremental|config-only]
+# 建议通过 Cron 定时执行
+
+set -euo pipefail
+
+# ============ 配置区域 ============
+BACKUP_TYPE=${1:-"full"}
+OPENCLAW_DIR="/opt/openclaw"
+BACKUP_BASE="/backup/openclaw"
+DATE=$(date +%Y%m%d_%H%M%S)
+DAY_OF_WEEK=$(date +%u)  # 1-7, 1=周一
+RETENTION_DAYS=30         # 本地备份保留天数
+RETENTION_WEEKLY=12       # 周备份保留周数
+
+# Docker 容器名称
+DB_CONTAINER="openclaw-postgres-1"
+APP_CONTAINER="openclaw-openclaw-1"
+
+# 云存储配置
+ENABLE_CLOUD_BACKUP=true
+CLOUD_PROVIDER="aliyun"   # aliyun 或 aws
+OSS_BUCKET="my-openclaw-backups"
+S3_BUCKET="my-openclaw-backups"
+
+# 通知配置
+NOTIFY_WEBHOOK="${BACKUP_NOTIFY_WEBHOOK:-}"
+
+# ============ 工具函数 ============
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+notify() {
+    local status=$1
+    local message=$2
+
+    if [ -n "$NOTIFY_WEBHOOK" ]; then
+        curl -s -X POST "$NOTIFY_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"msgtype\":\"text\",\"text\":{\"content\":\"OpenClaw 备份${status}: ${message}\"}}" \
+            > /dev/null 2>&1 || true
+    fi
+}
+
+check_disk_space() {
+    local required_gb=$1
+    local available_gb=$(df -BG "$BACKUP_BASE" | tail -1 | awk '{print $4}' | tr -d 'G')
+
+    if [ "$available_gb" -lt "$required_gb" ]; then
+        log "错误: 磁盘空间不足！需要 ${required_gb}GB，可用 ${available_gb}GB"
+        notify "失败" "磁盘空间不足 (需要 ${required_gb}GB，可用 ${available_gb}GB)"
+        exit 1
+    fi
+}
+
+# ============ 备份函数 ============
+
+# 备份 PostgreSQL 数据库
+backup_database() {
+    log "开始备份数据库..."
+    local db_backup_dir="${BACKUP_DIR}/database"
+    mkdir -p "$db_backup_dir"
+
+    # 全量备份（pg_dump）
+    docker exec "$DB_CONTAINER" pg_dump \
+        -U openclaw \
+        -d openclaw \
+        --format=custom \
+        --compress=9 \
+        --verbose \
+        > "${db_backup_dir}/openclaw_${DATE}.dump" 2>"${db_backup_dir}/dump.log"
+
+    # 同时导出 SQL 格式（便于人工检查）
+    docker exec "$DB_CONTAINER" pg_dump \
+        -U openclaw \
+        -d openclaw \
+        --format=plain \
+        --no-owner \
+        --no-privileges \
+        | gzip > "${db_backup_dir}/openclaw_${DATE}.sql.gz"
+
+    local db_size=$(du -sh "${db_backup_dir}" | cut -f1)
+    log "数据库备份完成，大小: ${db_size}"
+}
+
+# 备份 Docker Volumes
+backup_volumes() {
+    log "开始备份 Docker Volumes..."
+    local vol_backup_dir="${BACKUP_DIR}/volumes"
+    mkdir -p "$vol_backup_dir"
+
+    # 获取 OpenClaw 相关的所有 volume
+    local volumes=$(docker volume ls --format '{{.Name}}' | grep openclaw)
+
+    for vol in $volumes; do
+        log "  备份 Volume: $vol"
+        docker run --rm \
+            -v "${vol}:/source:ro" \
+            -v "${vol_backup_dir}:/backup" \
+            alpine:3.19 \
+            tar czf "/backup/${vol}_${DATE}.tar.gz" -C /source .
+    done
+
+    local vol_size=$(du -sh "${vol_backup_dir}" | cut -f1)
+    log "Volume 备份完成，大小: ${vol_size}"
+}
+
+# 备份配置文件
+backup_config() {
+    log "开始备份配置文件..."
+    local config_backup_dir="${BACKUP_DIR}/config"
+    mkdir -p "$config_backup_dir"
+
+    # 备份配置目录
+    tar czf "${config_backup_dir}/config_${DATE}.tar.gz" \
+        -C "$OPENCLAW_DIR" \
+        --exclude='.env' \
+        config/ docker-compose.yml mcp.config.json agents.yaml 2>/dev/null || true
+
+    # .env 文件加密备份
+    if [ -f "${OPENCLAW_DIR}/.env" ]; then
+        openssl enc -aes-256-cbc -salt -pbkdf2 \
+            -in "${OPENCLAW_DIR}/.env" \
+            -out "${config_backup_dir}/env_${DATE}.enc" \
+            -pass env:BACKUP_ENCRYPTION_KEY
+        log "  .env 已加密备份"
+    fi
+
+    # 备份 SSL 证书
+    if [ -d "/etc/letsencrypt" ]; then
+        tar czf "${config_backup_dir}/ssl_certs_${DATE}.tar.gz" \
+            -C /etc letsencrypt/ 2>/dev/null || true
+        log "  SSL 证书已备份"
+    fi
+
+    log "配置文件备份完成"
+}
+
+# 备份用户上传文件
+backup_uploads() {
+    log "开始备份上传文件..."
+    local upload_backup_dir="${BACKUP_DIR}/uploads"
+    mkdir -p "$upload_backup_dir"
+
+    if [ -d "${OPENCLAW_DIR}/data/uploads" ]; then
+        tar czf "${upload_backup_dir}/uploads_${DATE}.tar.gz" \
+            -C "${OPENCLAW_DIR}/data" uploads/
+
+        local upload_size=$(du -sh "${upload_backup_dir}" | cut -f1)
+        log "上传文件备份完成，大小: ${upload_size}"
+    else
+        log "无上传文件目录，跳过"
+    fi
+}
+
+# ============ 云同步 ============
+
+sync_to_cloud() {
+    if [ "$ENABLE_CLOUD_BACKUP" != "true" ]; then
+        log "云备份未启用，跳过"
+        return
+    fi
+
+    log "开始同步到云存储..."
+
+    case $CLOUD_PROVIDER in
+        aliyun)
+            # 使用 ossutil 同步到阿里云 OSS
+            ossutil cp -r "${BACKUP_DIR}" \
+                "oss://${OSS_BUCKET}/openclaw/${DATE}/" \
+                --update \
+                --jobs 4
+            log "已同步到阿里云 OSS: oss://${OSS_BUCKET}/openclaw/${DATE}/"
+            ;;
+        aws)
+            # 使用 AWS CLI 同步到 S3
+            aws s3 sync "${BACKUP_DIR}" \
+                "s3://${S3_BUCKET}/openclaw/${DATE}/" \
+                --storage-class STANDARD_IA \
+                --sse AES256
+            log "已同步到 AWS S3: s3://${S3_BUCKET}/openclaw/${DATE}/"
+            ;;
+    esac
+}
+
+# ============ 清理旧备份 ============
+
+cleanup_old_backups() {
+    log "清理过期备份..."
+
+    # 清理本地过期备份
+    find "$BACKUP_BASE" -maxdepth 1 -type d -name "20*" -mtime +${RETENTION_DAYS} -exec rm -rf {} \;
+    local cleaned=$(find "$BACKUP_BASE" -maxdepth 1 -type d -name "20*" -mtime +${RETENTION_DAYS} | wc -l)
+    log "已清理 ${cleaned} 个过期本地备份"
+
+    # 清理云端过期备份
+    if [ "$ENABLE_CLOUD_BACKUP" = "true" ]; then
+        case $CLOUD_PROVIDER in
+            aliyun)
+                # 使用 OSS 生命周期规则自动清理（建议在 OSS 控制台配置）
+                log "云端备份通过 OSS 生命周期规则自动清理"
+                ;;
+            aws)
+                # 使用 S3 生命周期策略自动清理
+                log "云端备份通过 S3 Lifecycle Policy 自动清理"
+                ;;
+        esac
+    fi
+}
+
+# ============ 主流程 ============
+
+main() {
+    log "=========================================="
+    log "OpenClaw 备份开始 - 类型: ${BACKUP_TYPE}"
+    log "=========================================="
+
+    BACKUP_DIR="${BACKUP_BASE}/${DATE}"
+    mkdir -p "$BACKUP_DIR"
+
+    # 检查磁盘空间（至少需要 5GB）
+    check_disk_space 5
+
+    case $BACKUP_TYPE in
+        full)
+            backup_database
+            backup_volumes
+            backup_config
+            backup_uploads
+            ;;
+        incremental)
+            backup_database
+            backup_config
+            ;;
+        config-only)
+            backup_config
+            ;;
+        *)
+            log "未知备份类型: ${BACKUP_TYPE}"
+            exit 1
+            ;;
+    esac
+
+    # 生成备份清单
+    log "生成备份清单..."
+    find "$BACKUP_DIR" -type f -exec ls -lh {} \; > "${BACKUP_DIR}/manifest.txt"
+    echo "备份时间: $(date)" >> "${BACKUP_DIR}/manifest.txt"
+    echo "备份类型: ${BACKUP_TYPE}" >> "${BACKUP_DIR}/manifest.txt"
+    sha256sum "${BACKUP_DIR}"/**/* >> "${BACKUP_DIR}/checksums.sha256" 2>/dev/null || true
+
+    # 同步到云存储
+    sync_to_cloud
+
+    # 清理旧备份
+    cleanup_old_backups
+
+    # 计算总大小
+    local total_size=$(du -sh "$BACKUP_DIR" | cut -f1)
+    log "=========================================="
+    log "备份完成！总大小: ${total_size}"
+    log "备份位置: ${BACKUP_DIR}"
+    log "=========================================="
+
+    notify "成功" "类型=${BACKUP_TYPE}, 大小=${total_size}, 位置=${BACKUP_DIR}"
+}
+
+# 错误处理
+trap 'log "备份过程中发生错误！(行号: $LINENO)"; notify "失败" "备份过程异常中断 (行号: $LINENO)"' ERR
+
+main
+```
+
+### Cron 定时任务配置
+
+```bash
+# 编辑 crontab: crontab -e
+
+# 每日凌晨 2 点全量备份
+0 2 * * * /opt/openclaw/scripts/openclaw-backup.sh full >> /var/log/openclaw-backup.log 2>&1
+
+# 每 6 小时增量备份（数据库 + 配置）
+0 */6 * * * /opt/openclaw/scripts/openclaw-backup.sh incremental >> /var/log/openclaw-backup.log 2>&1
+
+# 每次配置变更后立即备份（通过 inotifywait 监听）
+# 需要安装: apt-get install inotify-tools
+# 可以创建一个 systemd 服务来运行以下命令:
+# inotifywait -m -r -e modify,create,delete /opt/openclaw/config/ | \
+#   while read; do /opt/openclaw/scripts/openclaw-backup.sh config-only; done
+```
+
+## 数据库备份与恢复
+
+### PostgreSQL 恢复流程
+
+```bash
+#!/bin/bash
+# openclaw-restore-db.sh - 数据库恢复脚本
+# 用法: ./openclaw-restore-db.sh <备份文件路径>
+
+set -euo pipefail
+
+BACKUP_FILE=$1
+DB_CONTAINER="openclaw-postgres-1"
+DB_NAME="openclaw"
+DB_USER="openclaw"
+
+if [ ! -f "$BACKUP_FILE" ]; then
+    echo "错误: 备份文件不存在: $BACKUP_FILE"
+    exit 1
+fi
+
+echo "=========================================="
+echo "  OpenClaw 数据库恢复"
+echo "  备份文件: $BACKUP_FILE"
+echo "=========================================="
+echo ""
+echo "警告: 此操作将覆盖当前数据库中的所有数据！"
+read -p "确认继续？(输入 YES 确认): " confirm
+if [ "$confirm" != "YES" ]; then
+    echo "操作已取消"
+    exit 0
+fi
+
+# 1. 停止 OpenClaw 应用（保持数据库运行）
+echo "[1/5] 停止 OpenClaw 应用..."
+docker stop openclaw-openclaw-1 || true
+
+# 2. 创建当前数据的安全备份
+echo "[2/5] 创建恢复前安全备份..."
+docker exec "$DB_CONTAINER" pg_dump -U "$DB_USER" -d "$DB_NAME" \
+    --format=custom --compress=9 > "/tmp/pre_restore_backup_$(date +%Y%m%d_%H%M%S).dump"
+echo "  安全备份已保存到 /tmp/"
+
+# 3. 断开所有现有连接
+echo "[3/5] 断开现有数据库连接..."
+docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d postgres -c "
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();
+"
+
+# 4. 恢复数据库
+echo "[4/5] 开始恢复数据库..."
+if [[ "$BACKUP_FILE" == *.dump ]]; then
+    # 自定义格式恢复
+    docker exec -i "$DB_CONTAINER" pg_restore \
+        -U "$DB_USER" \
+        -d "$DB_NAME" \
+        --clean \
+        --if-exists \
+        --no-owner \
+        --no-privileges \
+        --verbose \
+        < "$BACKUP_FILE"
+elif [[ "$BACKUP_FILE" == *.sql.gz ]]; then
+    # SQL 格式恢复
+    gunzip -c "$BACKUP_FILE" | docker exec -i "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME"
+else
+    echo "错误: 不支持的备份格式"
+    exit 1
+fi
+
+# 5. 重启 OpenClaw
+echo "[5/5] 重启 OpenClaw..."
+docker start openclaw-openclaw-1
+
+echo ""
+echo "=========================================="
+echo "  数据库恢复完成！"
+echo "=========================================="
+echo "请验证: curl -s http://localhost:8080/health"
+```
+
+## 跨服务器迁移
+
+### 完整迁移步骤
+
+```bash
+#!/bin/bash
+# openclaw-migrate.sh - 跨服务器迁移脚本
+# 在源服务器上执行
+
+set -euo pipefail
+
+TARGET_HOST=$1
+TARGET_USER=${2:-root}
+TARGET_DIR=${3:-/opt/openclaw}
+
+echo "=========================================="
+echo "  OpenClaw 跨服务器迁移"
+echo "  目标: ${TARGET_USER}@${TARGET_HOST}:${TARGET_DIR}"
+echo "=========================================="
+
+# 1. 在源服务器创建完整备份
+echo "[1/6] 创建完整备份..."
+BACKUP_DIR="/tmp/openclaw-migration-$(date +%Y%m%d)"
+mkdir -p "$BACKUP_DIR"
+
+# 备份数据库
+docker exec openclaw-postgres-1 pg_dump \
+    -U openclaw -d openclaw --format=custom --compress=9 \
+    > "${BACKUP_DIR}/database.dump"
+
+# 备份 Docker Volumes
+for vol in $(docker volume ls --format '{{.Name}}' | grep openclaw); do
+    docker run --rm -v "${vol}:/source:ro" -v "${BACKUP_DIR}:/backup" \
+        alpine:3.19 tar czf "/backup/vol_${vol}.tar.gz" -C /source .
+done
+
+# 备份配置和数据
+tar czf "${BACKUP_DIR}/app_data.tar.gz" \
+    -C /opt/openclaw \
+    config/ docker-compose.yml .env mcp.config.json skills/ 2>/dev/null || true
+
+echo "  备份大小: $(du -sh ${BACKUP_DIR} | cut -f1)"
+
+# 2. 传输到目标服务器
+echo "[2/6] 传输备份到目标服务器..."
+rsync -avz --progress "${BACKUP_DIR}/" \
+    "${TARGET_USER}@${TARGET_HOST}:${TARGET_DIR}/migration/"
+
+# 3. 在目标服务器上执行恢复（通过 SSH）
+echo "[3/6] 在目标服务器上执行恢复..."
+ssh "${TARGET_USER}@${TARGET_HOST}" bash << 'REMOTE_SCRIPT'
+    set -euo pipefail
+    MIGRATE_DIR="$TARGET_DIR/migration"
+
+    echo "[4/6] 解压配置和数据..."
+    cd "$TARGET_DIR"
+    tar xzf "${MIGRATE_DIR}/app_data.tar.gz"
+
+    echo "[5/6] 启动基础服务..."
+    docker compose up -d postgres redis
+    sleep 10  # 等待数据库就绪
+
+    echo "[6/6] 恢复数据库..."
+    docker exec -i openclaw-postgres-1 pg_restore \
+        -U openclaw -d openclaw --clean --if-exists \
+        < "${MIGRATE_DIR}/database.dump"
+
+    # 恢复 Volumes
+    for vol_file in ${MIGRATE_DIR}/vol_*.tar.gz; do
+        vol_name=$(basename "$vol_file" | sed 's/^vol_//;s/_[0-9].*\.tar\.gz$//')
+        docker run --rm -v "${vol_name}:/target" -v "${MIGRATE_DIR}:/backup:ro" \
+            alpine:3.19 sh -c "cd /target && tar xzf /backup/$(basename $vol_file)"
+    done
+
+    # 启动所有服务
+    docker compose up -d
+
+    echo "迁移完成！验证: curl -s http://localhost:8080/health"
+REMOTE_SCRIPT
+
+echo "=========================================="
+echo "  迁移完成！请在目标服务器上验证服务状态"
+echo "=========================================="
+```
+
+## Docker 到 Kubernetes 迁移
+
+当 OpenClaw 需要从 Docker Compose 迁移到 Kubernetes 以获得更好的可扩展性和高可用性时，参考以下步骤。
+
+### Kubernetes 部署清单
+
+```yaml
+# k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openclaw
+
+---
+# k8s/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openclaw-config
+  namespace: openclaw
+data:
+  NODE_ENV: "production"
+  OPENCLAW_DB_HOST: "postgres-svc"
+  OPENCLAW_DB_PORT: "5432"
+  OPENCLAW_DB_NAME: "openclaw"
+  OPENCLAW_REDIS_URL: "redis://redis-svc:6379"
+  OPENCLAW_LOG_LEVEL: "info"
+
+---
+# k8s/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openclaw-secrets
+  namespace: openclaw
+type: Opaque
+stringData:
+  OPENCLAW_API_KEY: "your-api-key-here"
+  OPENCLAW_DB_USER: "openclaw"
+  OPENCLAW_DB_PASSWORD: "secure-password"
+  OPENCLAW_ENCRYPTION_KEY: "your-encryption-key"
+
+---
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openclaw
+  namespace: openclaw
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: openclaw
+  template:
+    metadata:
+      labels:
+        app: openclaw
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: openclaw
+          image: openclaw/openclaw:2026.2
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: openclaw-config
+            - secretRef:
+                name: openclaw-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: openclaw-data-pvc
+
+---
+# k8s/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openclaw-data-pvc
+  namespace: openclaw
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+
+---
+# k8s/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: openclaw-svc
+  namespace: openclaw
+spec:
+  selector:
+    app: openclaw
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: ClusterIP
+```
+
+## 备份验证与恢复演练
+
+定期验证备份的完整性和可恢复性至关重要。建议每季度至少执行一次完整的恢复演练：
+
+```bash
+#!/bin/bash
+# backup-verify.sh - 备份验证脚本
+
+set -euo pipefail
+
+BACKUP_DIR=$1
+VERIFY_CONTAINER="openclaw-verify-$(date +%s)"
+
+echo "=========================================="
+echo "  备份验证开始"
+echo "  备份目录: ${BACKUP_DIR}"
+echo "=========================================="
+
+# 1. 校验文件完整性
+echo "[1/4] 验证文件完整性..."
+if [ -f "${BACKUP_DIR}/checksums.sha256" ]; then
+    cd "$BACKUP_DIR"
+    if sha256sum -c checksums.sha256 --quiet 2>/dev/null; then
+        echo "  文件完整性验证通过"
+    else
+        echo "  错误: 文件完整性验证失败！"
+        exit 1
+    fi
+fi
+
+# 2. 在隔离环境中恢复数据库
+echo "[2/4] 在隔离环境中恢复数据库..."
+docker run -d --name "${VERIFY_CONTAINER}" \
+    -e POSTGRES_USER=openclaw \
+    -e POSTGRES_PASSWORD=verify_test \
+    -e POSTGRES_DB=openclaw \
+    postgres:16-alpine
+
+sleep 5  # 等待 PostgreSQL 就绪
+
+DB_DUMP=$(find "$BACKUP_DIR" -name "*.dump" | head -1)
+if [ -n "$DB_DUMP" ]; then
+    docker exec -i "${VERIFY_CONTAINER}" pg_restore \
+        -U openclaw -d openclaw --no-owner \
+        < "$DB_DUMP" 2>/dev/null
+
+    # 验证关键表是否存在且有数据
+    TABLES=$(docker exec "${VERIFY_CONTAINER}" psql -U openclaw -d openclaw -t -c \
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';")
+    echo "  数据库表数量: ${TABLES}"
+
+    USERS=$(docker exec "${VERIFY_CONTAINER}" psql -U openclaw -d openclaw -t -c \
+        "SELECT count(*) FROM users;" 2>/dev/null || echo "0")
+    echo "  用户记录数: ${USERS}"
+fi
+
+# 3. 验证配置文件
+echo "[3/4] 验证配置文件..."
+CONFIG_TAR=$(find "$BACKUP_DIR" -name "config_*.tar.gz" | head -1)
+if [ -n "$CONFIG_TAR" ]; then
+    tar tzf "$CONFIG_TAR" > /dev/null 2>&1 && echo "  配置文件归档完整" || echo "  配置文件归档损坏！"
+fi
+
+# 4. 生成验证报告
+echo "[4/4] 生成验证报告..."
+cat > "${BACKUP_DIR}/verify_report.txt" << EOF
+备份验证报告
+=============
+验证时间: $(date)
+备份目录: ${BACKUP_DIR}
+文件完整性: 通过
+数据库恢复: 通过 (表数量: ${TABLES:-N/A})
+配置文件: 通过
+验证结果: 全部通过
+EOF
+
+# 清理验证容器
+docker rm -f "${VERIFY_CONTAINER}" > /dev/null 2>&1
+
+echo ""
+echo "=========================================="
+echo "  备份验证完成 - 全部通过"
+echo "=========================================="
+```
+
+## 云存储备份
+
+### 阿里云 OSS 配置
+
+```bash
+#!/bin/bash
+# sync-to-oss.sh - 同步备份到阿里云 OSS
+
+# 安装 ossutil（首次使用时）
+# wget https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil-v1.7.18-linux-amd64.zip
+# unzip ossutil-v1.7.18-linux-amd64.zip && mv ossutil-v1.7.18-linux-amd64/ossutil64 /usr/local/bin/ossutil
+
+# 配置 ossutil
+ossutil config \
+    -e oss-cn-shanghai.aliyuncs.com \
+    -i "${ALIYUN_ACCESS_KEY_ID}" \
+    -k "${ALIYUN_ACCESS_KEY_SECRET}"
+
+# 上传备份（使用生命周期规则自动转换存储类型）
+ossutil cp -r /backup/openclaw/latest/ \
+    "oss://my-openclaw-backups/$(date +%Y/%m/%d)/" \
+    --jobs 4 \
+    --parallel 4 \
+    --meta "x-oss-storage-class:IA"
+
+echo "备份已同步到阿里云 OSS"
+```
+
+### AWS S3 配置
+
+```bash
+#!/bin/bash
+# sync-to-s3.sh - 同步备份到 AWS S3
+
+# 使用 AWS CLI 上传（含服务端加密）
+aws s3 sync /backup/openclaw/latest/ \
+    "s3://my-openclaw-backups/$(date +%Y/%m/%d)/" \
+    --storage-class STANDARD_IA \
+    --sse AES256 \
+    --exclude "*.log" \
+    --exclude "*.tmp"
+
+# 设置 S3 生命周期策略（通过 JSON 配置）
+aws s3api put-bucket-lifecycle-configuration \
+    --bucket my-openclaw-backups \
+    --lifecycle-configuration '{
+        "Rules": [
+            {
+                "ID": "TransitionToGlacier",
+                "Status": "Enabled",
+                "Filter": {"Prefix": ""},
+                "Transitions": [
+                    {"Days": 30, "StorageClass": "STANDARD_IA"},
+                    {"Days": 90, "StorageClass": "GLACIER"},
+                    {"Days": 365, "StorageClass": "DEEP_ARCHIVE"}
+                ],
+                "Expiration": {"Days": 730}
+            }
+        ]
+    }'
+
+echo "备份已同步到 AWS S3（含生命周期策略）"
+```
+
+## 灾难恢复计划
+
+制定灾难恢复计划（Disaster Recovery Plan, DRP）是保证业务连续性的最后防线：
+
+```
+灾难恢复计划 (DRP) 摘要
+========================
+
+1. RPO（恢复点目标）: 6 小时
+   → 最多丢失 6 小时的数据
+
+2. RTO（恢复时间目标）: 2 小时
+   → 从灾难发生到服务恢复不超过 2 小时
+
+3. 恢复优先级:
+   P0 - 核心 API 服务（30 分钟内）
+   P1 - 数据库恢复（1 小时内）
+   P2 - 完整功能恢复（2 小时内）
+   P3 - 历史数据恢复（24 小时内）
+
+4. 恢复步骤:
+   a. 在备用服务器/云主机上部署 Docker 环境
+   b. 从最近的云存储备份下载数据
+   c. 执行数据库恢复
+   d. 更新 DNS 记录指向新服务器
+   e. 验证服务可用性
+   f. 通知用户恢复情况
+
+5. 联系人:
+   - 主负责人: [运维负责人]
+   - 备份负责人: [备选运维]
+   - 决策人: [技术总监]
+```
+
+通过本教程的完整备份策略和实践脚本，你可以为 OpenClaw 实例建立起可靠的数据保护体系。记住：**没有经过验证的备份等于没有备份**。务必定期执行恢复演练，确保在真正需要时备份能够正常工作。

@@ -1,0 +1,654 @@
+---
+title: "MCP Server 集成指南"
+description: "全面介绍 Model Context Protocol (MCP) 的架构原理，详解如何在 OpenClaw 中配置和集成 MCP Server，涵盖推荐服务器列表、自定义开发、资源与工具注册、与 Skill 系统的关系对比、性能优化调试以及数据库 MCP Server 集成实战"
+category: "开发者篇"
+tags: ["MCP", "Server", "协议", "集成"]
+date: "2026-02-04"
+---
+
+## MCP 协议简介
+
+Model Context Protocol（MCP，模型上下文协议）是由 Anthropic 提出的开放标准协议，旨在为 AI 模型提供与外部数据源和工具交互的统一接口。MCP 的核心理念是将 AI 模型的能力边界从"生成文本"扩展到"感知世界、操作世界"。
+
+在 OpenClaw 生态中，MCP 扮演着至关重要的角色——它是 Agent 与外部世界沟通的标准桥梁。通过 MCP，Agent 可以访问数据库、文件系统、API 服务、开发工具等各类资源，而无需为每种资源编写专门的适配代码。
+
+### MCP 解决了什么问题？
+
+传统的 AI 工具集成面临以下挑战：
+
+- **碎片化**：每个工具都有独立的接口规范，集成成本高
+- **安全性差**：缺乏统一的权限控制和审计机制
+- **不可发现**：模型难以动态了解有哪些工具可用
+- **上下文断裂**：工具之间无法共享上下文信息
+
+MCP 通过标准化协议解决了这些问题，提供了统一的资源发现、工具调用和上下文共享能力。
+
+## 架构概览
+
+MCP 采用经典的 Client-Server 架构：
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    OpenClaw Runtime                      │
+│                                                          │
+│  ┌──────────────┐                                       │
+│  │   AI Agent    │                                       │
+│  └──────┬───────┘                                       │
+│         │                                                │
+│  ┌──────┴───────┐                                       │
+│  │  MCP Client   │  (OpenClaw 内置)                      │
+│  └──────┬───────┘                                       │
+│         │  JSON-RPC over stdio / SSE                     │
+├─────────┼────────────────────────────────────────────────┤
+│         │                                                │
+│  ┌──────┴───────────────────────────────────────┐       │
+│  │              MCP Transport Layer              │       │
+│  │         (stdio / HTTP+SSE / WebSocket)        │       │
+│  └──────┬──────────┬──────────────┬─────────────┘       │
+│         │          │              │                       │
+│  ┌──────┴───┐ ┌───┴────┐  ┌────┴──────┐                │
+│  │ MCP      │ │ MCP    │  │ MCP       │                 │
+│  │ Server A │ │ Server │  │ Server C  │                 │
+│  │(数据库)   │ │ B(Git) │  │(文件系统)  │                 │
+│  └──────────┘ └────────┘  └───────────┘                 │
+└────────────────────────────────────────────────────────┘
+```
+
+MCP 协议定义了三种核心原语：
+
+- **Resources（资源）**：MCP Server 对外暴露的数据，如文件内容、数据库记录等
+- **Tools（工具）**：MCP Server 提供的可执行操作，如查询数据、创建文件等
+- **Prompts（提示词模板）**：预定义的交互模板，帮助 Agent 高效使用 Server 的能力
+
+## 在 OpenClaw 中配置 MCP Server
+
+### 配置文件结构
+
+OpenClaw 使用 `mcp.config.json` 管理 MCP Server 配置，该文件位于 OpenClaw 安装目录的根路径：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data/workspace"],
+      "env": {},
+      "disabled": false
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "POSTGRES_CONNECTION_STRING": "postgresql://user:pass@localhost:5432/mydb"
+      }
+    },
+    "custom-api": {
+      "command": "node",
+      "args": ["./mcp-servers/custom-api/dist/index.js"],
+      "env": {
+        "API_BASE_URL": "https://api.example.com",
+        "API_KEY": "${CUSTOM_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### 通过 Docker Compose 配置
+
+在容器化部署场景中，MCP Server 可以作为独立的 sidecar 容器运行：
+
+```yaml
+version: "3.8"
+
+services:
+  openclaw:
+    image: openclaw/openclaw:2026.2
+    volumes:
+      - ./mcp.config.json:/app/mcp.config.json
+      - ./data:/app/data
+    environment:
+      - MCP_CONFIG_PATH=/app/mcp.config.json
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+    depends_on:
+      - mcp-postgres
+
+  mcp-postgres:
+    image: openclaw/mcp-server-postgres:latest
+    environment:
+      - POSTGRES_CONNECTION_STRING=postgresql://user:pass@db:5432/mydb
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=3200
+    expose:
+      - "3200"
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: mydb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
+```
+
+当 MCP Server 以独立服务形式运行时，使用 SSE（Server-Sent Events）传输模式：
+
+```json
+{
+  "mcpServers": {
+    "postgres": {
+      "transport": "sse",
+      "url": "http://mcp-postgres:3200/sse"
+    }
+  }
+}
+```
+
+## 推荐 MCP Server 列表
+
+以下是经过 OpenClaw 社区验证的高质量 MCP Server：
+
+| 名称 | 用途 | 安装命令 |
+|------|------|----------|
+| `server-filesystem` | 文件读写、目录管理 | `npx @modelcontextprotocol/server-filesystem` |
+| `server-github` | GitHub 仓库管理、PR、Issue | `npx @modelcontextprotocol/server-github` |
+| `server-postgres` | PostgreSQL 数据库操作 | `npx @modelcontextprotocol/server-postgres` |
+| `server-sqlite` | SQLite 数据库查询 | `npx @modelcontextprotocol/server-sqlite` |
+| `server-brave-search` | Brave 搜索引擎集成 | `npx @modelcontextprotocol/server-brave-search` |
+| `server-puppeteer` | 浏览器自动化 | `npx @modelcontextprotocol/server-puppeteer` |
+| `server-slack` | Slack 消息和频道管理 | `npx @modelcontextprotocol/server-slack` |
+| `server-memory` | 持久化记忆存储 | `npx @modelcontextprotocol/server-memory` |
+
+## 自定义 MCP Server 开发
+
+当现有的 MCP Server 无法满足需求时，你可以开发自己的 MCP Server。
+
+### 项目初始化
+
+```bash
+mkdir my-mcp-server && cd my-mcp-server
+npm init -y
+npm install @modelcontextprotocol/sdk zod
+npm install -D typescript @types/node
+npx tsc --init
+```
+
+`tsconfig.json` 关键配置：
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "declaration": true
+  },
+  "include": ["src/**/*"]
+}
+```
+
+### 实现 MCP Server
+
+以下是一个完整的自定义 MCP Server 实现——内部 API 网关，让 Agent 能够查询公司内部系统：
+
+```typescript
+// src/index.ts
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+// 创建 MCP Server 实例
+const server = new McpServer({
+  name: 'internal-api-gateway',
+  version: '1.0.0',
+  description: '公司内部 API 网关，提供员工信息和项目管理功能',
+});
+
+// API 基础配置
+const API_BASE = process.env.API_BASE_URL || 'https://internal-api.company.com';
+const API_KEY = process.env.API_KEY || '';
+
+// 通用请求函数
+async function apiCall<T>(
+  endpoint: string,
+  method: string = 'GET',
+  body?: unknown
+): Promise<T> {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    method,
+    headers: {
+      'Authorization': `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    throw new Error(`API 请求失败: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+// ============ 注册 Resources（资源）============
+
+server.resource(
+  'employee-list',
+  'employees://list',
+  async (uri) => {
+    const employees = await apiCall<Array<{ id: string; name: string; department: string }>>(
+      '/api/employees'
+    );
+
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: 'application/json',
+          text: JSON.stringify(employees, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+server.resource(
+  'project-list',
+  'projects://list',
+  async (uri) => {
+    const projects = await apiCall<Array<{ id: string; name: string; status: string }>>(
+      '/api/projects'
+    );
+
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: 'application/json',
+          text: JSON.stringify(projects, null, 2),
+        },
+      ],
+    };
+  }
+);
+
+// ============ 注册 Tools（工具）============
+
+server.tool(
+  'query-employee',
+  '根据姓名或工号查询员工信息',
+  {
+    query: z.string().describe('员工姓名或工号'),
+    department: z.string().optional().describe('部门名称（可选，用于过滤）'),
+  },
+  async ({ query, department }) => {
+    const params = new URLSearchParams({ q: query });
+    if (department) params.append('dept', department);
+
+    const result = await apiCall<Array<{
+      id: string;
+      name: string;
+      department: string;
+      email: string;
+      title: string;
+    }>>(`/api/employees/search?${params}`);
+
+    if (result.length === 0) {
+      return {
+        content: [{ type: 'text' as const, text: `未找到匹配"${query}"的员工记录` }],
+      };
+    }
+
+    const formatted = result
+      .map(
+        (e) => `- ${e.name} (${e.id}) | ${e.department} | ${e.title} | ${e.email}`
+      )
+      .join('\n');
+
+    return {
+      content: [{ type: 'text' as const, text: `找到 ${result.length} 名员工:\n${formatted}` }],
+    };
+  }
+);
+
+server.tool(
+  'create-ticket',
+  '创建内部工单',
+  {
+    title: z.string().min(5).max(200).describe('工单标题'),
+    description: z.string().min(10).describe('工单详细描述'),
+    priority: z.enum(['low', 'medium', 'high', 'critical']).describe('优先级'),
+    assignee: z.string().optional().describe('指派给（员工工号）'),
+  },
+  async ({ title, description, priority, assignee }) => {
+    const ticket = await apiCall<{ id: string; url: string }>(
+      '/api/tickets',
+      'POST',
+      { title, description, priority, assignee }
+    );
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `工单创建成功！\n- 工单号: ${ticket.id}\n- 链接: ${ticket.url}`,
+        },
+      ],
+    };
+  }
+);
+
+server.tool(
+  'run-sql-readonly',
+  '在只读副本上执行 SQL 查询（仅 SELECT）',
+  {
+    sql: z.string().describe('SQL 查询语句（仅支持 SELECT）'),
+    database: z.enum(['main', 'analytics', 'logs']).describe('目标数据库'),
+  },
+  async ({ sql, database }) => {
+    // 安全检查：确保只是 SELECT 语句
+    const normalized = sql.trim().toUpperCase();
+    if (!normalized.startsWith('SELECT')) {
+      return {
+        content: [{ type: 'text' as const, text: '安全限制：仅允许 SELECT 查询' }],
+        isError: true,
+      };
+    }
+
+    // 检测危险关键字
+    const dangerous = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'TRUNCATE'];
+    for (const keyword of dangerous) {
+      if (normalized.includes(keyword)) {
+        return {
+          content: [{ type: 'text' as const, text: `安全限制：查询中包含禁止的关键字 ${keyword}` }],
+          isError: true,
+        };
+      }
+    }
+
+    const result = await apiCall<{ columns: string[]; rows: unknown[][] }>(
+      '/api/query',
+      'POST',
+      { sql, database }
+    );
+
+    // 格式化为表格
+    const header = result.columns.join(' | ');
+    const separator = result.columns.map(() => '---').join(' | ');
+    const rows = result.rows.map((row) => row.join(' | ')).join('\n');
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `查询结果（${result.rows.length} 行）:\n\n${header}\n${separator}\n${rows}`,
+        },
+      ],
+    };
+  }
+);
+
+// ============ 注册 Prompts（提示词模板）============
+
+server.prompt(
+  'analyze-team',
+  '分析团队成员分布和工作负载',
+  { department: z.string().describe('部门名称') },
+  async ({ department }) => {
+    return {
+      messages: [
+        {
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: `请分析 ${department} 部门的团队情况。首先查询该部门的所有员工列表，然后查询他们当前负责的项目和工单数量，最后给出团队工作负载分析报告。`,
+          },
+        },
+      ],
+    };
+  }
+);
+
+// ============ 启动 Server ============
+
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('Internal API Gateway MCP Server 已启动');
+}
+
+main().catch((error) => {
+  console.error('MCP Server 启动失败:', error);
+  process.exit(1);
+});
+```
+
+## MCP 与 Skill 系统的关系
+
+OpenClaw 同时支持 MCP Server 和 Skill 两种扩展机制，它们有不同的定位和适用场景：
+
+| 特性 | MCP Server | Skill |
+|------|-----------|-------|
+| **协议标准** | 开放的 MCP 协议 | OpenClaw 私有 SDK |
+| **运行方式** | 独立进程 | Skill Runtime 沙箱 |
+| **通信方式** | JSON-RPC (stdio/SSE) | 进程内函数调用 |
+| **跨平台** | 可用于任何 MCP 客户端 | 仅限 OpenClaw |
+| **适用场景** | 数据源连接、外部系统集成 | 业务逻辑封装、Agent 能力增强 |
+| **性能** | 进程间通信开销略大 | 更低的调用延迟 |
+| **生态** | 全球 MCP 生态 | ClawHub 生态 |
+
+简单来说：**MCP 负责"连接世界"，Skill 负责"处理逻辑"**。在实际项目中，两者经常配合使用——MCP Server 提供数据访问能力，Skill 封装业务处理流程。
+
+## 性能优化与调试
+
+### 性能优化策略
+
+```typescript
+// 1. 连接池管理 —— 避免频繁创建连接
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  connectionString: process.env.POSTGRES_CONNECTION_STRING,
+  max: 10,              // 最大连接数
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+// 2. 结果缓存 —— 减少重复查询
+const cache = new Map<string, { data: unknown; expiry: number }>();
+
+function withCache<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  const cached = cache.get(key);
+  if (cached && cached.expiry > Date.now()) {
+    return Promise.resolve(cached.data as T);
+  }
+
+  return fn().then((data) => {
+    cache.set(key, { data, expiry: Date.now() + ttlMs });
+    return data;
+  });
+}
+
+// 3. 结果分页 —— 避免大数据量传输
+server.tool(
+  'query-logs',
+  '查询系统日志',
+  {
+    keyword: z.string(),
+    page: z.number().int().min(1).default(1),
+    pageSize: z.number().int().min(1).max(100).default(20),
+  },
+  async ({ keyword, page, pageSize }) => {
+    const offset = (page - 1) * pageSize;
+    const result = await pool.query(
+      'SELECT * FROM logs WHERE message ILIKE $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      [`%${keyword}%`, pageSize, offset]
+    );
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({
+          data: result.rows,
+          page,
+          pageSize,
+          hasMore: result.rows.length === pageSize,
+        }, null, 2),
+      }],
+    };
+  }
+);
+```
+
+### 调试技巧
+
+使用 MCP Inspector 进行交互式调试：
+
+```bash
+# 安装 MCP Inspector
+npm install -g @modelcontextprotocol/inspector
+
+# 启动调试界面
+mcp-inspector node dist/index.js
+
+# 浏览器访问 http://localhost:5173 进行交互式测试
+```
+
+在 OpenClaw 中开启 MCP 调试日志：
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "node",
+      "args": ["./dist/index.js"],
+      "env": {
+        "DEBUG": "mcp:*"
+      }
+    }
+  },
+  "mcpDebug": {
+    "enabled": true,
+    "logLevel": "debug",
+    "logFile": "/var/log/openclaw/mcp-debug.log",
+    "traceMessages": true
+  }
+}
+```
+
+调试时可以直接通过 stdin/stdout 测试 MCP Server：
+
+```bash
+# 手动发送 JSON-RPC 请求测试
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist/index.js
+
+# 测试工具调用
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query-employee","arguments":{"query":"张三"}}}' | node dist/index.js
+```
+
+## 实战：集成数据库 MCP Server
+
+下面通过一个完整的实战案例，展示如何为 OpenClaw 集成 PostgreSQL MCP Server，让 Agent 能够智能查询和分析业务数据。
+
+### 第一步：准备数据库
+
+```sql
+-- 创建示例业务表
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    category VARCHAR(50),
+    price DECIMAL(10,2),
+    stock INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    product_id INT REFERENCES products(id),
+    customer_name VARCHAR(100),
+    quantity INT,
+    total_amount DECIMAL(10,2),
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 插入示例数据
+INSERT INTO products (name, category, price, stock) VALUES
+  ('OpenClaw Pro License', '软件', 299.00, 999),
+  ('技术支持包(年)', '服务', 1999.00, 100),
+  ('培训课程-AI Agent 开发', '教育', 599.00, 50);
+```
+
+### 第二步：配置 MCP Server
+
+```json
+{
+  "mcpServers": {
+    "business-db": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://readonly_user:secure_pass@localhost:5432/business"
+      ]
+    }
+  }
+}
+```
+
+### 第三步：在 OpenClaw 中使用
+
+配置完成后重启 OpenClaw，Agent 即可使用数据库查询能力：
+
+```
+用户: 帮我查一下目前库存最少的 3 个产品
+
+Agent (内部调用 MCP):
+  → tools/call: run-sql-readonly
+  → SQL: SELECT name, category, stock FROM products ORDER BY stock ASC LIMIT 3
+
+Agent 回复: 目前库存最少的 3 个产品是：
+1. 培训课程-AI Agent 开发 — 库存 50 件
+2. 技术支持包(年) — 库存 100 件
+3. OpenClaw Pro License — 库存 999 件
+```
+
+### 安全注意事项
+
+在集成数据库 MCP Server 时，务必注意以下安全要点：
+
+1. **使用只读账户**：为 MCP Server 创建专门的只读数据库用户
+2. **限制可访问的表**：通过数据库权限控制，只授予必要表的 SELECT 权限
+3. **网络隔离**：MCP Server 与数据库之间通过内网通信
+4. **查询审计**：记录所有通过 MCP 执行的查询，便于事后审计
+5. **超时限制**：设置查询执行超时，防止慢查询拖垮系统
+
+```sql
+-- 创建只读用户
+CREATE USER mcp_readonly WITH PASSWORD 'secure_random_password';
+GRANT CONNECT ON DATABASE business TO mcp_readonly;
+GRANT USAGE ON SCHEMA public TO mcp_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO mcp_readonly;
+
+-- 设置查询超时（毫秒）
+ALTER USER mcp_readonly SET statement_timeout = '10000';
+```
+
+通过本指南的学习，你已经掌握了在 OpenClaw 中集成和开发 MCP Server 的核心能力。MCP 作为连接 AI 与外部世界的标准协议，正在被越来越多的项目采用。熟练掌握 MCP 开发，将极大地拓展你的 Agent 所能触达的能力边界。

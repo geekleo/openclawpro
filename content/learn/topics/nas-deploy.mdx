@@ -1,0 +1,471 @@
+---
+title: "群晖 NAS 上运行 OpenClaw"
+description: "在群晖 NAS 上部署 OpenClaw 的完整指南，涵盖 Container Manager 安装、Docker Compose 配置、存储卷挂载、内网与外网访问设置及性能优化"
+category: "部署篇"
+tags: ["群晖", "NAS", "Docker", "家庭部署"]
+date: "2026-02-20"
+---
+
+## 前言
+
+对于已经拥有群晖 NAS 的用户来说，在 NAS 上运行 OpenClaw 是一个非常理想的选择。NAS 24 小时在线、功耗低、自带存储冗余，非常适合作为个人或家庭的 AI Agent 平台运行环境。本教程将详细介绍如何在群晖 NAS 上部署和运行 OpenClaw。
+
+## 一、硬件要求与推荐型号
+
+### 最低要求
+
+OpenClaw 运行在 Docker 容器中，需要一定的 CPU 和内存资源。以下是最低硬件要求：
+
+- **CPU**：Intel Celeron J4125 或更高（需要支持 x86_64 架构）
+- **内存**：4 GB（推荐 8 GB 以上）
+- **存储**：至少 20 GB 可用空间
+- **DSM 版本**：DSM 7.2 或更高
+
+### 推荐型号
+
+| 型号 | CPU | 内存 | 适用场景 | 推荐指数 |
+|-----|-----|------|---------|---------|
+| DS224+ | Intel Celeron J4125 | 2 GB（可扩至 6 GB） | 个人轻量使用 | 一般 |
+| DS423+ | Intel Celeron J4125 | 2 GB（可扩至 6 GB） | 个人标准使用 | 推荐 |
+| DS920+ | Intel Celeron J4125 | 4 GB（可扩至 8 GB） | 个人/小团队 | 强烈推荐 |
+| DS1522+ | AMD Ryzen R1600 | 8 GB（可扩至 32 GB） | 团队/重度使用 | 强烈推荐 |
+| DS1823xs+ | AMD Ryzen V1780B | 8 GB（可扩至 32 GB） | 企业级使用 | 高端推荐 |
+
+**重要提示**：ARM 架构的群晖 NAS（如 DS223j 等 j 系列）不支持运行 OpenClaw 的 Docker 镜像，请确保你的 NAS 是 x86_64 架构（+ 系列或 xs 系列）。
+
+### 内存升级建议
+
+如果你的 NAS 只有 2 GB 内存，强烈建议先升级内存。以 DS920+ 为例：
+
+1. 关机并拔掉电源
+2. 拆下底部硬盘托架区域的内存盖板
+3. 插入一条兼容的 DDR4 SO-DIMM 内存条（推荐 4 GB 或 8 GB）
+4. 重新开机后在「控制面板 -> 信息中心」确认内存已识别
+
+## 二、通过 Container Manager 安装（图形界面）
+
+DSM 7.2 内置了 Container Manager（原 Docker 套件），提供图形化的容器管理界面。
+
+### 步骤 1：安装 Container Manager
+
+1. 打开 DSM 桌面，进入「套件中心」
+2. 搜索「Container Manager」
+3. 点击「安装」并等待完成
+
+### 步骤 2：通过界面创建项目
+
+1. 打开 Container Manager，点击左侧「项目」
+2. 点击「新增」，填写项目名称为 `openclaw`
+3. 设置路径为 `/volume1/docker/openclaw`
+4. 在 Docker Compose 编辑器中粘贴配置（见下方完整配置）
+5. 点击「下一步」，确认配置后点击「完成」
+
+这种方式适合不熟悉命令行的用户，但对于高级配置，推荐使用下面的 SSH 命令行方式。
+
+## 三、Docker Compose 部署方法（推荐）
+
+通过 SSH 连接到 NAS 并使用 Docker Compose 部署，可以获得更大的灵活性。
+
+### 开启 SSH 服务
+
+1. 进入 DSM「控制面板 -> 终端机和 SNMP」
+2. 勾选「启用 SSH 功能」
+3. 设置端口号（默认 22，建议改为其他端口如 2222）
+
+### 连接并创建目录
+
+```bash
+# SSH 连接到 NAS
+ssh admin@192.168.1.100 -p 2222
+
+# 切换到 root 权限
+sudo -i
+
+# 创建项目目录
+mkdir -p /volume1/docker/openclaw/{data,config,logs}
+cd /volume1/docker/openclaw
+```
+
+### 创建环境变量文件
+
+```bash
+cat > /volume1/docker/openclaw/.env << 'EOF'
+# OpenClaw 配置
+OPENCLAW_API_KEY=your-api-key-here
+OPENCLAW_SECRET=your-secret-key-here
+
+# 数据库配置
+DB_USER=openclaw
+DB_PASSWORD=YourStrongPassword2026
+
+# AI 模型配置
+OPENAI_API_KEY=sk-your-openai-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+EOF
+
+chmod 600 /volume1/docker/openclaw/.env
+```
+
+### 创建 Docker Compose 配置
+
+```bash
+cat > /volume1/docker/openclaw/docker-compose.yml << 'YAML'
+version: "3.8"
+
+services:
+  openclaw:
+    image: openclaw/openclaw:latest
+    container_name: openclaw-app
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - /volume1/docker/openclaw/data:/app/data
+      - /volume1/docker/openclaw/config:/app/config
+      - /volume1/docker/openclaw/logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_API_KEY=${OPENCLAW_API_KEY}
+      - OPENCLAW_SECRET=${OPENCLAW_SECRET}
+      - OPENCLAW_DB_HOST=postgres
+      - OPENCLAW_DB_PORT=5432
+      - OPENCLAW_DB_NAME=openclaw
+      - OPENCLAW_DB_USER=${DB_USER}
+      - OPENCLAW_DB_PASSWORD=${DB_PASSWORD}
+      - OPENCLAW_REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+    networks:
+      - openclaw-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: openclaw-db
+    restart: always
+    volumes:
+      - /volume1/docker/openclaw/postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=openclaw
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openclaw -d openclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - openclaw-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: openclaw-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - /volume1/docker/openclaw/redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - openclaw-net
+
+networks:
+  openclaw-net:
+    driver: bridge
+YAML
+```
+
+### 启动服务
+
+```bash
+cd /volume1/docker/openclaw
+docker compose up -d
+
+# 查看运行状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f openclaw
+```
+
+## 四、存储卷挂载配置
+
+群晖 NAS 的存储结构有其特殊性，正确配置卷挂载至关重要。
+
+### 存储卷说明
+
+```
+/volume1/              # 第一个存储卷（通常是你的主存储池）
+  ├── docker/          # Docker 共享文件夹
+  │   └── openclaw/    # OpenClaw 项目目录
+  │       ├── data/           # 应用数据
+  │       ├── config/         # 配置文件
+  │       ├── logs/           # 日志文件
+  │       ├── postgres_data/  # 数据库数据
+  │       └── redis_data/     # 缓存数据
+  └── ...
+```
+
+### 权限设置
+
+群晖 Docker 容器默认以 root 运行，但共享文件夹的权限需要正确配置：
+
+```bash
+# 设置目录权限
+chown -R 1000:1000 /volume1/docker/openclaw/data
+chown -R 1000:1000 /volume1/docker/openclaw/config
+chown -R 1000:1000 /volume1/docker/openclaw/logs
+chown -R 999:999 /volume1/docker/openclaw/postgres_data
+
+# 设置合适的目录权限
+chmod 755 /volume1/docker/openclaw/data
+chmod 755 /volume1/docker/openclaw/config
+chmod 755 /volume1/docker/openclaw/logs
+```
+
+### 使用 SSD 缓存加速
+
+如果你的 NAS 安装了 SSD 缓存（如 M.2 NVMe），可以将数据库数据目录放在 SSD 缓存卷上以获得更好的 I/O 性能：
+
+```yaml
+# 在 docker-compose.yml 中修改 postgres 的卷挂载
+volumes:
+  - /volume2/docker/openclaw/postgres_data:/var/lib/postgresql/data  # volume2 为 SSD 卷
+```
+
+## 五、内网访问配置
+
+部署完成后，在局域网内可以直接通过 NAS 的 IP 地址访问 OpenClaw。
+
+### 直接访问
+
+在浏览器中输入 `http://192.168.1.100:3000` 即可访问 OpenClaw。
+
+### 通过群晖反向代理访问
+
+为了使用更友好的 URL，可以利用 DSM 内置的反向代理功能：
+
+1. 进入 DSM「控制面板 -> 登录门户 -> 高级」
+2. 点击「反向代理」
+3. 新增一条规则：
+   - 描述：OpenClaw
+   - 来源协议：HTTPS
+   - 来源主机名：openclaw.local（或你的自定义域名）
+   - 来源端口：443
+   - 目的地协议：HTTP
+   - 目的地主机名：localhost
+   - 目的地端口：3000
+4. 在「自定义标头」中添加 WebSocket 支持：
+   - 新增 -> WebSocket
+
+### 配置本地 DNS
+
+在路由器或电脑的 hosts 文件中添加：
+
+```
+192.168.1.100  openclaw.local
+```
+
+然后就可以通过 `https://openclaw.local` 访问了。
+
+## 六、外网访问配置
+
+### 方案一：DDNS + 端口转发
+
+群晖内置了 DDNS 服务，可以方便地实现外网访问。
+
+**配置 DDNS：**
+
+1. 进入「控制面板 -> 外部访问 -> DDNS」
+2. 新增 DDNS：
+   - 服务供应商：Synology（免费）
+   - 主机名称：yourname.synology.me
+3. 测试连接并保存
+
+**配置路由器端口转发：**
+
+在路由器管理界面中设置端口转发规则：
+
+| 外部端口 | 内部 IP | 内部端口 | 协议 |
+|---------|---------|---------|------|
+| 443 | 192.168.1.100 | 443 | TCP |
+| 80 | 192.168.1.100 | 80 | TCP |
+
+### 方案二：Cloudflare Tunnel（推荐）
+
+Cloudflare Tunnel 无需暴露公网端口，更加安全：
+
+```bash
+# 在 docker-compose.yml 中添加 cloudflared 服务
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: openclaw-tunnel
+    restart: always
+    command: tunnel --no-autoupdate run --token YOUR_TUNNEL_TOKEN
+    networks:
+      - openclaw-net
+```
+
+具体的 Cloudflare Tunnel 配置流程：
+
+1. 注册 Cloudflare 并添加域名
+2. 进入 Zero Trust Dashboard -> Networks -> Tunnels
+3. 创建新隧道，获取 Token
+4. 将 Token 填入上方配置
+5. 配置公共主机名映射到 `openclaw:3000`
+
+### 方案三：Tailscale
+
+Tailscale 是另一个优秀的远程访问方案，详见本系列的 Tailscale 专题教程。
+
+## 七、自动更新配置
+
+### 使用 Watchtower 自动更新
+
+Watchtower 可以自动检测并更新 Docker 镜像：
+
+```yaml
+# 在 docker-compose.yml 中添加
+  watchtower:
+    image: containrrr/watchtower
+    container_name: openclaw-watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400  # 每 24 小时检查一次
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_MONITOR_ONLY=false
+      - WATCHTOWER_SCOPE=openclaw
+    labels:
+      - "com.centurylinklabs.watchtower.scope=openclaw"
+    networks:
+      - openclaw-net
+```
+
+同时为需要自动更新的服务添加标签：
+
+```yaml
+  openclaw:
+    # ... 原有配置 ...
+    labels:
+      - "com.centurylinklabs.watchtower.scope=openclaw"
+```
+
+### 手动更新流程
+
+如果你不希望自动更新，可以使用以下手动更新步骤：
+
+```bash
+cd /volume1/docker/openclaw
+
+# 备份数据库
+docker compose exec -T postgres pg_dump -U openclaw openclaw > backup_$(date +%Y%m%d).sql
+
+# 拉取最新镜像
+docker compose pull openclaw
+
+# 重启服务
+docker compose up -d openclaw
+
+# 验证更新
+docker compose logs -f openclaw --tail 50
+```
+
+## 八、NAS 性能优化建议
+
+### 内存分配优化
+
+NAS 内存有限，需要合理分配各服务的内存限制：
+
+```yaml
+# 4 GB 内存的 NAS 推荐配置
+deploy:
+  resources:
+    limits:
+      memory: 1.5G   # OpenClaw 主服务
+---
+# PostgreSQL
+deploy:
+  resources:
+    limits:
+      memory: 512M
+---
+# Redis
+deploy:
+  resources:
+    limits:
+      memory: 128M
+```
+
+### 减少磁盘 I/O
+
+NAS 使用机械硬盘时，磁盘 I/O 可能成为瓶颈：
+
+```bash
+# 调整 PostgreSQL 参数减少写入频率
+# 在 docker-compose.yml 的 postgres 服务中添加
+command: >
+  postgres
+  -c shared_buffers=128MB
+  -c effective_cache_size=256MB
+  -c checkpoint_completion_target=0.9
+  -c wal_buffers=4MB
+  -c synchronous_commit=off
+```
+
+### 关闭不必要的 DSM 服务
+
+为了给 OpenClaw 留出更多资源：
+
+1. 关闭不使用的套件（如 Moments、Video Station 等）
+2. 减少 DSM 索引服务的资源占用
+3. 在「控制面板 -> 共享文件夹」中关闭不需要的文件索引
+
+### 监控资源使用
+
+```bash
+# 查看容器资源占用
+docker stats --no-stream
+
+# 查看 NAS 整体资源
+top
+free -h
+df -h
+```
+
+也可以在 DSM 的「资源监控」中实时查看 CPU、内存和磁盘的使用情况。
+
+## 总结
+
+群晖 NAS 部署 OpenClaw 的核心优势在于低功耗长期运行、数据安全有保障、局域网访问速度快。通过本教程，你已经掌握了：
+
+- 选择合适的 NAS 型号和配置
+- 通过 Container Manager 或 Docker Compose 部署 OpenClaw
+- 正确配置存储卷和文件权限
+- 实现内网和外网的远程访问
+- 配置自动更新保持版本最新
+- 针对 NAS 硬件特点进行性能优化
+
+如果你需要从外网安全访问部署在 NAS 上的 OpenClaw，推荐阅读 Tailscale 内网穿透专题教程，获得更安全便捷的远程访问方案。

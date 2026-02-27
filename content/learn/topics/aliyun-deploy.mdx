@@ -1,0 +1,534 @@
+---
+title: "阿里云 ECS 一键部署 OpenClaw"
+description: "手把手教你在阿里云 ECS 云服务器上部署 OpenClaw，涵盖实例选型、安全组配置、Docker 安装、Nginx 反向代理与 HTTPS 证书申请的完整流程"
+category: "部署篇"
+tags: ["阿里云", "ECS", "云部署", "Linux"]
+date: "2026-02-20"
+---
+
+## 前言
+
+阿里云 ECS（Elastic Compute Service）是国内最主流的云服务器方案之一，凭借稳定的网络环境、丰富的地域节点和完善的生态体系，非常适合用于部署 OpenClaw。本文将从零开始，手把手带你完成从 ECS 选购到 OpenClaw 完整上线的全部流程。
+
+无论你是个人开发者希望搭建自己的 AI Agent 平台，还是企业团队准备在云端运行 OpenClaw，本篇教程都能满足你的需求。
+
+## 一、ECS 实例选型建议
+
+### 最低配置要求
+
+OpenClaw 的运行需要一定的计算和内存资源。以下是不同使用场景的推荐配置：
+
+| 使用场景 | CPU | 内存 | 系统盘 | 带宽 | 推荐实例规格 |
+|---------|-----|------|-------|------|------------|
+| 个人开发测试 | 2 核 | 4 GB | 40 GB SSD | 3 Mbps | ecs.t6-c1m2.large |
+| 小团队使用 | 4 核 | 8 GB | 80 GB SSD | 5 Mbps | ecs.c7.xlarge |
+| 生产环境 | 8 核 | 16 GB | 200 GB SSD | 10 Mbps | ecs.c7.2xlarge |
+| 高并发场景 | 16 核 | 32 GB | 500 GB SSD | 20 Mbps | ecs.c7.4xlarge |
+
+### 选购要点
+
+1. **地域选择**：优先选择你的目标用户集中的地域。国内用户推荐华东 1（杭州）或华北 2（北京），延迟更低。
+2. **操作系统**：推荐 Ubuntu 22.04 LTS 或 CentOS Stream 9，长期支持且 Docker 兼容性好。
+3. **计费方式**：长期运行推荐包年包月，短期测试使用按量计费。
+4. **数据盘**：建议单独挂载数据盘用于存储 OpenClaw 的数据，避免系统盘满后影响服务。
+
+```bash
+# 购买后，你会拿到以下关键信息：
+# - 公网 IP：47.xxx.xxx.xxx
+# - 登录用户名：root
+# - 登录密码或密钥对
+```
+
+## 二、安全组配置
+
+安全组相当于云端防火墙，必须正确配置才能让外部访问到 OpenClaw 服务。
+
+### 需要开放的端口
+
+登录阿里云控制台，进入 ECS 实例详情页，找到「安全组」选项卡，添加以下入方向规则：
+
+| 端口范围 | 协议 | 授权对象 | 说明 |
+|---------|------|---------|------|
+| 22/22 | TCP | 你的 IP/32 | SSH 远程登录（建议限制 IP） |
+| 80/80 | TCP | 0.0.0.0/0 | HTTP 访问 |
+| 443/443 | TCP | 0.0.0.0/0 | HTTPS 访问 |
+| 3000/3000 | TCP | 你的 IP/32 | OpenClaw 直连调试（上线后可关闭） |
+
+**安全建议**：SSH 端口（22）强烈建议限制为你自己的公网 IP，切勿对全网开放。3000 端口仅在调试阶段开放，配置好 Nginx 反向代理后应当关闭。
+
+## 三、SSH 连接到服务器
+
+### 使用密码登录
+
+```bash
+ssh root@47.xxx.xxx.xxx
+```
+
+### 使用密钥对登录（推荐）
+
+```bash
+# 首先设置密钥文件权限
+chmod 400 ~/.ssh/your-key.pem
+
+# 使用密钥连接
+ssh -i ~/.ssh/your-key.pem root@47.xxx.xxx.xxx
+```
+
+### 初始化服务器安全设置
+
+连接成功后，建议立即执行以下安全初始化：
+
+```bash
+# 更新系统软件包
+apt update && apt upgrade -y
+
+# 创建非 root 用户
+adduser openclaw
+usermod -aG sudo openclaw
+
+# 配置 SSH 安全（禁用 root 密码登录）
+sed -i 's/PermitRootLogin yes/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+systemctl restart sshd
+
+# 安装常用工具
+apt install -y curl wget git vim htop ufw
+
+# 配置 UFW 防火墙（与安全组双重防护）
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
+```
+
+## 四、安装 Docker 和 Docker Compose
+
+Docker 是运行 OpenClaw 的基础环境。由于国内网络环境的特殊性，建议使用阿里云的镜像源加速安装。
+
+```bash
+# 安装依赖
+apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+# 添加 Docker 官方 GPG 密钥（使用阿里云镜像）
+curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+# 添加 Docker 仓库
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# 安装 Docker
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# 配置 Docker 镜像加速器
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.mirrors.ustc.edu.cn"
+  ],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+
+# 重启 Docker
+systemctl daemon-reload
+systemctl restart docker
+systemctl enable docker
+
+# 将当前用户加入 docker 组（如果使用非 root 用户）
+usermod -aG docker openclaw
+
+# 验证安装
+docker --version
+docker compose version
+```
+
+## 五、部署 OpenClaw
+
+### 创建项目目录
+
+```bash
+mkdir -p /opt/openclaw/{data,config,logs,nginx/conf.d,nginx/ssl,nginx/logs}
+cd /opt/openclaw
+```
+
+### 创建环境变量文件
+
+```bash
+cat > .env << 'EOF'
+# OpenClaw 配置
+OPENCLAW_API_KEY=your-api-key-here
+OPENCLAW_SECRET=your-secret-key-here
+
+# 数据库配置
+DB_USER=openclaw
+DB_PASSWORD=Change_Me_To_A_Strong_Password_2026
+
+# 域名配置
+DOMAIN=openclaw.yourdomain.com
+
+# AI 模型配置
+OPENAI_API_KEY=sk-your-openai-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+EOF
+
+# 设置文件权限，防止密码泄露
+chmod 600 .env
+```
+
+### 创建 Docker Compose 配置
+
+```yaml
+# docker-compose.yml
+version: "3.8"
+
+services:
+  # OpenClaw 核心服务
+  openclaw:
+    image: openclaw/openclaw:latest
+    container_name: openclaw-app
+    restart: always
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - OPENCLAW_API_KEY=${OPENCLAW_API_KEY}
+      - OPENCLAW_SECRET=${OPENCLAW_SECRET}
+      - OPENCLAW_DB_HOST=postgres
+      - OPENCLAW_DB_PORT=5432
+      - OPENCLAW_DB_NAME=openclaw
+      - OPENCLAW_DB_USER=${DB_USER}
+      - OPENCLAW_DB_PASSWORD=${DB_PASSWORD}
+      - OPENCLAW_REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - openclaw-net
+
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:16-alpine
+    container_name: openclaw-db
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=openclaw
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d openclaw"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openclaw-net
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: openclaw-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - openclaw-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  openclaw-net:
+    driver: bridge
+```
+
+### 启动服务
+
+```bash
+cd /opt/openclaw
+
+# 拉取镜像并启动
+docker compose up -d
+
+# 查看启动状态
+docker compose ps
+
+# 查看启动日志（等待所有服务就绪）
+docker compose logs -f openclaw
+```
+
+当你看到类似 `OpenClaw is running on port 3000` 的日志时，说明核心服务已启动成功。此时可以通过 `http://47.xxx.xxx.xxx:3000` 访问（前提是安全组已开放 3000 端口）。
+
+## 六、配置 Nginx 反向代理 + HTTPS
+
+### 安装 Nginx 和 Certbot
+
+```bash
+# 安装 Nginx
+apt install -y nginx
+
+# 安装 Certbot（用于申请 Let's Encrypt 免费证书）
+apt install -y certbot python3-certbot-nginx
+```
+
+### 配置 Nginx
+
+```bash
+cat > /etc/nginx/sites-available/openclaw << 'NGINX'
+# HTTP -> HTTPS 重定向
+server {
+    listen 80;
+    server_name openclaw.yourdomain.com;
+
+    # Certbot 验证路径
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+# HTTPS 主配置
+server {
+    listen 443 ssl http2;
+    server_name openclaw.yourdomain.com;
+
+    # SSL 证书（由 Certbot 自动填充）
+    ssl_certificate /etc/letsencrypt/live/openclaw.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/openclaw.yourdomain.com/privkey.pem;
+
+    # SSL 安全配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # 安全头
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # 请求体大小限制（上传文件用）
+    client_max_body_size 100M;
+
+    # 反向代理到 OpenClaw
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket 支持（OpenClaw 实时通信需要）
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # 超时设置（AI 处理可能较慢）
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_connect_timeout 60s;
+    }
+}
+NGINX
+
+# 启用站点配置
+ln -sf /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+
+# 测试配置语法（先注释掉 SSL 部分，因为证书还未申请）
+nginx -t
+```
+
+### 申请 SSL 证书
+
+```bash
+# 先确保域名已解析到服务器 IP，然后申请证书
+certbot --nginx -d openclaw.yourdomain.com --non-interactive --agree-tos -m your-email@example.com
+
+# 验证证书自动续期
+certbot renew --dry-run
+
+# 设置自动续期定时任务（Certbot 通常已自动添加）
+systemctl enable certbot.timer
+systemctl start certbot.timer
+```
+
+### 重启 Nginx
+
+```bash
+nginx -t && systemctl restart nginx
+systemctl enable nginx
+```
+
+## 七、配置域名解析
+
+在你的域名服务商（阿里云域名、腾讯云 DNSPod 等）控制台添加 DNS 记录：
+
+| 记录类型 | 主机记录 | 记录值 | TTL |
+|---------|---------|--------|-----|
+| A | openclaw | 47.xxx.xxx.xxx | 600 |
+
+如果你使用阿里云域名，操作路径为：域名控制台 -> 域名列表 -> 解析设置 -> 添加记录。
+
+配置完成后等待 DNS 生效（通常几分钟），然后通过浏览器访问 `https://openclaw.yourdomain.com` 即可看到 OpenClaw 的界面。
+
+## 八、常见问题排查
+
+### Docker 镜像拉取超时
+
+国内网络拉取 Docker Hub 镜像时经常超时，解决方案：
+
+```bash
+# 确认已配置镜像加速器
+cat /etc/docker/daemon.json
+
+# 或手动拉取后再启动
+docker pull openclaw/openclaw:latest
+docker compose up -d
+```
+
+### 端口被占用
+
+```bash
+# 检查端口占用情况
+ss -tlnp | grep -E ':(80|443|3000)'
+
+# 如果 80/443 被 Apache 占用
+systemctl stop apache2
+systemctl disable apache2
+```
+
+### 数据库连接失败
+
+```bash
+# 检查 PostgreSQL 容器状态
+docker compose logs postgres
+
+# 进入容器测试连接
+docker compose exec postgres psql -U openclaw -d openclaw -c "SELECT 1;"
+
+# 如果数据库未初始化，重建
+docker compose down -v  # 注意：-v 会删除数据卷
+docker compose up -d
+```
+
+### 内存不足导致服务崩溃
+
+```bash
+# 查看系统内存使用
+free -h
+
+# 查看 Docker 容器资源占用
+docker stats --no-stream
+
+# 如果内存不足，可以添加 swap
+fallocate -l 4G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+```
+
+### 查看 OpenClaw 日志排查问题
+
+```bash
+# 实时查看应用日志
+docker compose logs -f openclaw --tail 100
+
+# 查看 Nginx 访问日志
+tail -f /var/log/nginx/access.log
+
+# 查看 Nginx 错误日志
+tail -f /var/log/nginx/error.log
+```
+
+## 九、运维建议
+
+### 定期备份
+
+```bash
+# 创建备份脚本
+cat > /opt/openclaw/backup.sh << 'SCRIPT'
+#!/bin/bash
+BACKUP_DIR="/opt/openclaw/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+mkdir -p $BACKUP_DIR
+
+# 备份数据库
+docker compose -f /opt/openclaw/docker-compose.yml exec -T postgres \
+  pg_dump -U openclaw openclaw | gzip > "$BACKUP_DIR/db_$DATE.sql.gz"
+
+# 备份配置文件
+tar czf "$BACKUP_DIR/config_$DATE.tar.gz" /opt/openclaw/config /opt/openclaw/.env
+
+# 清理 30 天前的旧备份
+find $BACKUP_DIR -type f -mtime +30 -delete
+
+echo "Backup completed: $DATE"
+SCRIPT
+
+chmod +x /opt/openclaw/backup.sh
+
+# 添加每日自动备份的 cron 任务
+echo "0 3 * * * /opt/openclaw/backup.sh >> /var/log/openclaw-backup.log 2>&1" | crontab -
+```
+
+### 更新 OpenClaw
+
+```bash
+cd /opt/openclaw
+
+# 拉取最新镜像
+docker compose pull openclaw
+
+# 滚动更新（不中断其他服务）
+docker compose up -d openclaw
+
+# 确认服务正常
+docker compose ps
+docker compose logs -f openclaw --tail 50
+```
+
+## 总结
+
+通过以上步骤，你已经在阿里云 ECS 上完成了 OpenClaw 的完整部署，包括：
+
+- 合理选择 ECS 实例规格
+- 配置安全组保障网络安全
+- 安装 Docker 环境并配置国内加速
+- 使用 Docker Compose 部署 OpenClaw 全套服务
+- 通过 Nginx 反向代理和 Let's Encrypt 实现 HTTPS 访问
+- 配置域名解析实现自定义域名访问
+
+接下来你可以继续阅读其他教程，学习如何接入 Telegram Bot、微信、飞书等消息平台，充分发挥 OpenClaw 作为 AI Agent 平台的能力。

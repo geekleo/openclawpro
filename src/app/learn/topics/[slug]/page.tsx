@@ -1,21 +1,37 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MDXContent } from "@/components/mdx-content";
 import { ArticleCTA } from "@/components/conversion/article-cta";
+import { getTopicBySlug, getTopicSlugs } from "@/lib/content";
 import type { Metadata } from "next";
 
 interface PageProps {
   params: { slug: string };
 }
 
+export function generateStaticParams() {
+  const slugs = getTopicSlugs();
+  return slugs.map((slug: string) => ({ slug }));
+}
+
 export function generateMetadata({ params }: PageProps): Metadata {
+  const topic = getTopicBySlug(params.slug);
+  if (!topic) return { title: "专题教程" };
   return {
-    title: `专题教程 - ${params.slug}`,
-    description: `OpenClaw 专题教程：${params.slug}`,
+    title: topic.title,
+    description: topic.description,
   };
 }
 
 export default function TopicDetailPage({ params }: PageProps) {
+  const topic = getTopicBySlug(params.slug);
+
+  if (!topic) {
+    notFound();
+  }
+
   return (
     <div className="container max-w-3xl py-12 md:py-16">
       <div className="mb-8">
@@ -25,27 +41,15 @@ export default function TopicDetailPage({ params }: PageProps) {
       </div>
 
       <article className="prose prose-neutral dark:prose-invert max-w-none">
-        <Badge variant="secondary" className="mb-4">专题教程</Badge>
-        <h1>专题教程 — {params.slug}</h1>
-        <p className="lead text-muted-foreground">
-          这篇教程将带你深入了解相关主题，包含完整的配置步骤和最佳实践。
-        </p>
+        <div className="mb-6">
+          <Badge variant="secondary" className="mb-3">{topic.category}</Badge>
+          <h1 className="!mt-0">{topic.title}</h1>
+          <p className="text-muted-foreground !mt-2">
+            {new Date(topic.date).toLocaleDateString("zh-CN")} · {topic.tags?.join(", ")}
+          </p>
+        </div>
 
-        <h2>前提条件</h2>
-        <ul>
-          <li>已安装 OpenClaw（参考 Day 1 教程）</li>
-          <li>基本的命令行操作经验</li>
-        </ul>
-
-        <h2>详细步骤</h2>
-        <p>更多内容即将推出，敬请期待...</p>
-
-        <h2>延伸阅读</h2>
-        <p>以下是一些相关的优质外部资源：</p>
-        <ul>
-          <li>官方文档 — 获取最新的配置参考</li>
-          <li>社区讨论 — 查看其他用户的实践经验</li>
-        </ul>
+        <MDXContent code={topic.body} />
       </article>
 
       <ArticleCTA />

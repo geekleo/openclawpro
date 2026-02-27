@@ -1,0 +1,328 @@
+---
+title: "RSS 新闻聚合与每日简报"
+description: "使用 OpenClaw RSS Skill 聚合多源信息、AI 智能摘要分类、自动生成每日简报并推送到你喜欢的平台"
+category: "效率工具篇"
+tags: ["RSS", "新闻聚合", "信息获取", "简报"]
+date: "2026-02-07"
+---
+
+## 前言
+
+在信息爆炸的时代，如何高效获取高质量信息是每个人面临的挑战。通过 OpenClaw 的 RSS Skill，你可以订阅各种信息源，利用 AI 自动摘要和分类，生成个性化的每日简报。
+
+## 一、安装与配置
+
+```bash
+# 安装 RSS Skill
+openclaw skill install rss-reader
+
+# 验证安装
+openclaw rss test
+```
+
+基础配置：
+
+```yaml
+# ~/.openclaw/skills/rss-reader/config.yaml
+rss:
+  # 更新频率
+  check_interval: "30m"
+
+  # 去重设置
+  dedup:
+    enabled: true
+    method: "url_hash"  # url_hash | title_similarity
+    similarity_threshold: 0.85
+
+  # AI 处理
+  ai:
+    summarize: true
+    max_summary_length: 150
+    classify: true
+    language: "zh-CN"
+    quality_filter:
+      enabled: true
+      min_score: 6  # 1-10 评分，低于此分数跳过
+
+  # 存储
+  storage:
+    type: "sqlite"
+    path: "${HOME}/.openclaw/data/rss.db"
+    retention_days: 90
+```
+
+## 二、添加订阅源
+
+### 推荐订阅源列表
+
+```yaml
+feeds:
+  # AI/技术
+  - name: "Hacker News 精选"
+    url: "https://hnrss.org/best"
+    category: "技术"
+    tags: ["AI", "创业", "编程"]
+
+  - name: "机器之心"
+    url: "https://www.jiqizhixin.com/rss"
+    category: "AI"
+    tags: ["AI", "深度学习", "论文"]
+
+  - name: "36氪"
+    url: "https://36kr.com/feed"
+    category: "科技"
+    tags: ["创业", "投融资", "产品"]
+
+  - name: "少数派"
+    url: "https://sspai.com/feed"
+    category: "效率"
+    tags: ["效率", "工具", "方法论"]
+
+  - name: "阮一峰周刊"
+    url: "https://www.ruanyifeng.com/blog/atom.xml"
+    category: "技术"
+    tags: ["前端", "开源", "工具"]
+
+  # 开源/GitHub
+  - name: "GitHub Trending"
+    url: "https://rsshub.app/github/trending/daily/any"
+    category: "开源"
+    tags: ["开源", "GitHub", "项目"]
+
+  - name: "Product Hunt"
+    url: "https://www.producthunt.com/feed"
+    category: "产品"
+    tags: ["产品", "创业", "设计"]
+
+  # 行业
+  - name: "InfoQ 中文"
+    url: "https://www.infoq.cn/feed"
+    category: "技术"
+    tags: ["架构", "DevOps", "云原生"]
+
+  - name: "虎嗅"
+    url: "https://www.huxiu.com/rss/0.xml"
+    category: "商业"
+    tags: ["商业", "互联网", "分析"]
+```
+
+### OPML 批量导入
+
+```bash
+# 从其他 RSS 阅读器导出 OPML 文件后导入
+openclaw rss import --file subscriptions.opml
+
+# 导出当前订阅
+openclaw rss export --file my-feeds.opml
+```
+
+## 三、每日简报自动生成
+
+### 完整工作流配置
+
+```yaml
+name: daily_tech_briefing
+schedule: "0 8 * * *"  # 每天早上 8 点
+
+steps:
+  - name: fetch_feeds
+    action: rss.fetch_all
+    params:
+      since: "24h"
+      max_per_feed: 20
+
+  - name: dedup
+    action: rss.dedup
+    params:
+      items: "{{feed_items}}"
+      method: "url_hash"
+
+  - name: quality_filter
+    action: ai.score
+    params:
+      items: "{{unique_items}}"
+      prompt: |
+        对这篇文章的质量和价值打分（1-10）：
+        标题：{{title}}
+        摘要：{{description}}
+        来源：{{source}}
+
+        评分标准：
+        - 信息价值（是否有新见解）
+        - 时效性（是否是近期热点）
+        - 实用性（是否对读者有帮助）
+      min_score: 6
+
+  - name: classify
+    action: ai.classify
+    params:
+      items: "{{quality_items}}"
+      categories:
+        - "AI/大模型"
+        - "开源项目"
+        - "产品发布"
+        - "行业分析"
+        - "技术教程"
+        - "创业融资"
+
+  - name: summarize
+    action: ai.batch_summarize
+    params:
+      items: "{{classified_items}}"
+      prompt: |
+        为每篇文章生成 2-3 句中文摘要，突出核心观点和数据。
+        如果是技术文章，提取关键技术点。
+        如果是商业文章，提取关键数据和结论。
+
+  - name: compose_briefing
+    action: ai.compose
+    prompt: |
+      生成今日技术简报，按以下格式：
+
+      📰 今日技术简报 | {{date}}
+      来源：{{total_sources}} 个信息源 | 精选 {{total_articles}} 篇
+
+      🔥 今日头条（最重要的 1-2 条）
+      详细摘要 + 为什么重要
+
+      🤖 AI/大模型
+      - 标题 | 来源 | 一句话摘要
+
+      💻 开源项目
+      - 标题 | Star 数 | 一句话介绍
+
+      📱 产品发布
+      - 标题 | 一句话摘要
+
+      📊 行业分析
+      - 标题 | 关键数据
+
+      📝 值得一读（推荐完整阅读的 2-3 篇）
+      - 标题 + 推荐理由
+
+  - name: push_telegram
+    action: telegram.send
+    params:
+      message: "{{briefing}}"
+      parse_mode: "Markdown"
+
+  - name: save_notion
+    action: notion.create_page
+    params:
+      database_id: "${BRIEFING_DB}"
+      properties:
+        标题:
+          title: "技术简报 - {{date}}"
+        日期:
+          date:
+            start: "{{date}}"
+      content: "{{briefing}}"
+```
+
+## 四、关键词监控
+
+```yaml
+name: keyword_monitor
+schedule: "*/30 * * * *"  # 每 30 分钟检查一次
+
+keywords:
+  high_priority:
+    - "OpenClaw"
+    - "AI Agent"
+    - "Claude"
+    alert_channel: "telegram"
+    alert_immediately: true
+
+  medium_priority:
+    - "大模型"
+    - "MCP"
+    - "自动化"
+    alert_channel: "daily_summary"
+
+steps:
+  - name: fetch_and_match
+    action: rss.fetch_all
+    params:
+      since: "30m"
+
+  - name: keyword_match
+    action: filter
+    params:
+      items: "{{feed_items}}"
+      match_any: "{{keywords.high_priority}}"
+      fields: ["title", "description"]
+
+  - name: alert
+    condition: "{{matched_items.length}} > 0"
+    action: telegram.send
+    params:
+      message: |
+        🔔 关键词监控告警
+
+        {{#each matched_items}}
+        📌 {{title}}
+        🔗 {{url}}
+        💡 匹配关键词：{{matched_keywords}}
+        📝 {{summary}}
+
+        {{/each}}
+```
+
+## 五、实战：技术周报自动生成
+
+```yaml
+name: weekly_tech_report
+schedule: "0 16 * * 5"  # 每周五下午 4 点
+
+steps:
+  - name: collect_week_data
+    action: rss.fetch_all
+    params:
+      since: "7d"
+
+  - name: analyze_trends
+    action: ai.analyze
+    prompt: |
+      分析本周 {{total}} 篇文章的趋势：
+      1. 本周最热门的 5 个话题
+      2. 新出现的技术趋势
+      3. 值得关注的开源项目 Top 5
+      4. 行业关键数据汇总
+
+  - name: compose_weekly
+    action: ai.compose
+    prompt: |
+      生成技术周报：
+
+      📅 技术周报 | {{week_range}}
+
+      📊 本周数据
+      - 处理文章：{{total}} 篇
+      - 信息源：{{sources}} 个
+      - 热门话题：{{top_topics}}
+
+      🔥 本周热点 Top 5
+      （每条 3-5 句话详细解读）
+
+      🌟 值得关注的开源项目
+
+      📈 趋势分析
+
+      📚 推荐阅读（5 篇精选长文）
+
+  - name: publish
+    actions:
+      - notion.create_page
+      - telegram.send
+      - email.send  # 发送给订阅者
+```
+
+## 效果数据
+
+| 指标 | 手动获取信息 | RSS + AI 自动化 |
+|------|------------|----------------|
+| 每日信息获取时间 | 60 分钟 | 5 分钟（阅读简报） |
+| 信息源数量 | 5-8 个 | 30+ 个 |
+| 重要信息遗漏率 | 40% | 5% |
+| 周报撰写时间 | 2 小时 | 0（自动生成） |
+| 关键词监控延迟 | 次日发现 | 30 分钟内 |

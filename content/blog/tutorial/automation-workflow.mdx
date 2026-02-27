@@ -1,0 +1,876 @@
+---
+title: "零代码搭建 5 个实用自动化工作流"
+description: "手把手教你用 OpenClaw 搭建5个实用的自动化工作流：每日新闻简报、GitHub Star 监控、竞品价格监控、自动化周报和社交媒体热点追踪。每个工作流都附带完整的 YAML 配置，复制即用。"
+date: "2026-02-18"
+category: "tutorial"
+tags: ["自动化", "工作流", "Cron", "教程"]
+published: true
+---
+
+# 零代码搭建 5 个实用自动化工作流
+
+自动化是 OpenClaw 最核心的能力之一。本文将手把手教你搭建 5 个即学即用的自动化工作流，每个工作流都包含完整的 YAML 配置和详细的搭建步骤。不需要写一行代码，只需要按照配置模板填写你自己的参数即可。
+
+在开始之前，请确保你已经完成了 OpenClaw 的基础安装和配置。如果还没有，请先阅读「快速入门」文档。
+
+---
+
+## 工作流 1：每日新闻智能简报
+
+**场景**：每天早上收到一份由 AI 精选和总结的新闻简报，覆盖你关注的领域，推送到 Telegram 或微信。
+
+**架构**：RSS 订阅 → AI 筛选与总结 → 格式化输出 → Telegram 推送
+
+**预计搭建时间**：15 分钟
+
+### 工作原理
+
+1. 系统每天早上 7 点通过 RSS 抓取你订阅的新闻源
+2. AI 从大量文章中筛选出最值得关注的 8-10 条
+3. 对每条新闻生成一段 50-100 字的中文摘要
+4. 按照类别分组，格式化为易读的简报格式
+5. 通过 Telegram Bot 推送给你
+
+### 完整配置
+
+```yaml
+name: daily-news-briefing
+description: 每日 AI 新闻智能简报
+version: "1.0.0"
+
+triggers:
+  - type: cron
+    schedule: "0 7 * * *"  # 每天早上7点执行
+    timezone: "Asia/Shanghai"
+
+settings:
+  model: gpt-4o
+  temperature: 0.3
+  max_tokens: 4000
+
+data_sources:
+  rss_feeds:
+    tech:
+      - name: "36氪"
+        url: "https://36kr.com/feed"
+        category: "科技商业"
+      - name: "虎嗅"
+        url: "https://www.huxiu.com/rss/0.xml"
+        category: "科技商业"
+      - name: "少数派"
+        url: "https://sspai.com/feed"
+        category: "效率工具"
+      - name: "Hacker News"
+        url: "https://hnrss.org/frontpage"
+        category: "国际科技"
+      - name: "TechCrunch"
+        url: "https://techcrunch.com/feed/"
+        category: "国际科技"
+
+    ai:
+      - name: "机器之心"
+        url: "https://www.jiqizhixin.com/rss"
+        category: "人工智能"
+      - name: "量子位"
+        url: "https://www.qbitai.com/feed"
+        category: "人工智能"
+
+  fetch_config:
+    timeout: 30
+    max_articles_per_source: 20
+    lookback_hours: 24  # 只获取最近24小时的文章
+
+processing:
+  # 第一步：筛选
+  selection:
+    prompt: |
+      从以下新闻列表中选出最值得关注的 8-10 条。筛选标准：
+      1. 行业影响力：对科技行业有重大影响的事件优先
+      2. 实用价值：对读者的工作和学习有实际帮助
+      3. 新颖性：优先选择新趋势、新产品、新观点
+      4. 多样性：确保不同类别都有覆盖
+
+      请直接返回选中的文章编号列表。
+
+  # 第二步：摘要生成
+  summarization:
+    prompt: |
+      请为以下新闻文章生成中文摘要：
+
+      文章标题：{title}
+      文章内容：{content}
+
+      要求：
+      - 字数控制在 50-100 字
+      - 提炼核心信息，不要泛泛而谈
+      - 如果涉及数据，保留关键数字
+      - 结尾可以加一句简短的点评
+
+  # 第三步：格式化
+  formatting:
+    template: |
+      📋 每日科技简报 | {date}
+
+      {category_sections}
+
+      ---
+      由 OpenClaw 自动生成
+      共筛选自 {total_sources} 个信息源的 {total_articles} 篇文章
+
+    category_template: |
+      【{category}】
+
+      {articles}
+
+    article_template: |
+      ▫️ {title}
+      {summary}
+      🔗 {link}
+
+notification:
+  - type: telegram
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+    parse_mode: "Markdown"
+
+  # 可选：同时推送到微信（通过企业微信机器人）
+  # - type: webhook
+  #   url: "${WECHAT_WEBHOOK_URL}"
+  #   method: POST
+```
+
+### 搭建步骤
+
+1. 将上面的配置保存为 `daily-news-briefing.yaml`
+2. 替换 `${TELEGRAM_BOT_TOKEN}` 和 `${TELEGRAM_CHAT_ID}` 为你的 Telegram Bot 信息
+3. 根据你的兴趣修改 RSS 源列表
+4. 调整 Cron 时间为你期望的推送时间
+5. 运行 `openclaw skill install ./daily-news-briefing.yaml` 完成安装
+
+### 效果预览
+
+每天早上你会收到这样的一条消息：
+
+```
+📋 每日科技简报 | 2026-02-18
+
+【科技商业】
+▫️ 字节跳动发布新一代视频生成模型
+字节跳动今日发布视频生成模型 PixelDance 2.0，支持 4K 分辨率、
+最长 3 分钟的视频生成，在多项基准测试中超越 Sora。该模型将首先
+在剪映中上线。
+🔗 https://36kr.com/p/xxxxx
+
+【人工智能】
+▫️ DeepSeek 开源推理模型训练框架
+DeepSeek 开源了用于训练推理增强模型的完整框架 ReasonFlow，
+包含数据生成、训练和评估全流程工具链，已在 GitHub 获得 5000+ Star。
+🔗 https://www.jiqizhixin.com/articles/xxxxx
+
+---
+由 OpenClaw 自动生成
+共筛选自 7 个信息源的 87 篇文章
+```
+
+---
+
+## 工作流 2：GitHub Star 监控
+
+**场景**：实时监控你的 GitHub 仓库或关注的开源项目的 Star 变化，及时发现 Star 暴增（可能有大V推荐）或暴跌（可能有负面事件）的异常情况。
+
+**架构**：定时轮询 GitHub API → 数据对比 → 异常检测 → 通知
+
+**预计搭建时间**：10 分钟
+
+### 完整配置
+
+```yaml
+name: github-star-monitor
+description: GitHub 仓库 Star 变化监控与异常告警
+version: "1.0.0"
+
+triggers:
+  # 每小时检查一次
+  - type: cron
+    schedule: "0 * * * *"
+    task: hourly_check
+
+  # 每天早上9点发送日报
+  - type: cron
+    schedule: "0 9 * * *"
+    task: daily_report
+
+  # 每周一早上发送周报
+  - type: cron
+    schedule: "0 9 * * 1"
+    task: weekly_report
+
+settings:
+  model: gpt-4o
+  temperature: 0.2
+  max_tokens: 2000
+
+github:
+  token: "${GITHUB_TOKEN}"
+  repos:
+    - owner: "your-org"
+      repo: "openclaw"
+      label: "OpenClaw 主仓库"
+    - owner: "your-org"
+      repo: "openclaw-skills"
+      label: "Skill 市场"
+    # 也可以监控竞品或感兴趣的项目
+    - owner: "langchain-ai"
+      repo: "langchain"
+      label: "LangChain（竞品参考）"
+    - owner: "microsoft"
+      repo: "autogen"
+      label: "AutoGen（竞品参考）"
+
+monitoring:
+  metrics:
+    - stars          # Star 数
+    - forks          # Fork 数
+    - open_issues    # 开放 Issue 数
+    - watchers       # Watch 数
+
+  # 异常检测阈值
+  alerts:
+    star_surge:
+      description: "Star 暴增告警"
+      condition: "hourly_star_increase > 50"
+      severity: "info"
+      message: "🌟 {repo} 过去1小时新增 {count} 个 Star！可能有大V推荐，建议关注来源。"
+
+    star_drop:
+      description: "Star 异常下降告警"
+      condition: "hourly_star_decrease > 20"
+      severity: "warning"
+      message: "⚠️ {repo} 过去1小时减少了 {count} 个 Star，建议关注是否有负面事件。"
+
+    milestone:
+      description: "里程碑告警"
+      condition: "stars % 1000 == 0"
+      severity: "info"
+      message: "🎉 {repo} 的 Star 数突破了 {stars}！"
+
+    issue_surge:
+      description: "Issue 暴增告警"
+      condition: "daily_new_issues > 20"
+      severity: "warning"
+      message: "📋 {repo} 今日新增 {count} 个 Issue，可能有版本Bug或重大变更引发的用户反馈。"
+
+daily_report:
+  prompt: |
+    请根据以下 GitHub 数据生成每日简报：
+
+    {repo_data}
+
+    输出格式：
+    ## GitHub 日报 | {date}
+
+    ### 数据概览
+    | 仓库 | Star | 今日变化 | Fork | Issue |
+
+    ### 趋势分析
+    （简要分析趋势变化，50字以内）
+
+    ### 关注事项
+    （如有异常数据或值得关注的变化）
+
+weekly_report:
+  prompt: |
+    请根据以下一周的 GitHub 数据生成周报：
+
+    {weekly_data}
+
+    输出格式：
+    ## GitHub 周报 | {start_date} ~ {end_date}
+
+    ### 本周数据
+    | 仓库 | 周初Star | 周末Star | 变化 | 增长率 |
+
+    ### 趋势图描述
+    （描述 Star 增长曲线的走势特征）
+
+    ### 竞品对比
+    （与监控的竞品项目进行简要对比）
+
+    ### 建议
+    （基于数据给出 1-2 条可操作建议）
+
+storage:
+  type: json_file
+  path: "./data/github_stats.json"
+  retention_days: 90  # 保留90天的历史数据
+
+notification:
+  - type: telegram
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+```
+
+### 搭建步骤
+
+1. 将配置保存为 `github-star-monitor.yaml`
+2. 在 GitHub Settings → Developer Settings → Personal Access Tokens 创建 Token（需要 `public_repo` 权限）
+3. 替换配置中的 `${GITHUB_TOKEN}` 和 Telegram 信息
+4. 修改 `repos` 列表为你要监控的仓库
+5. 根据实际规模调整告警阈值
+6. 运行 `openclaw skill install ./github-star-monitor.yaml`
+
+---
+
+## 工作流 3：竞品价格监控
+
+**场景**：自动监控竞品或关注商品在电商平台上的价格变化，及时发现降价、促销或涨价信息，辅助定价决策或个人购物。
+
+**架构**：定时爬取价格页面 → 数据对比 → AI 分析 → 价格变动通知
+
+**预计搭建时间**：20 分钟
+
+### 完整配置
+
+```yaml
+name: competitor-price-monitor
+description: 竞品/商品价格变化监控与分析
+version: "1.0.0"
+
+triggers:
+  # 每天早上8点和下午6点各检查一次
+  - type: cron
+    schedule: "0 8,18 * * *"
+    task: price_check
+
+  # 每周一生成价格分析周报
+  - type: cron
+    schedule: "0 9 * * 1"
+    task: weekly_analysis
+
+settings:
+  model: gpt-4o
+  temperature: 0.2
+  max_tokens: 3000
+
+products:
+  - id: "prod_001"
+    name: "竞品A - 企业版年度订阅"
+    url: "https://competitor-a.com/pricing"
+    selector: ".enterprise-price .amount"  # CSS选择器定位价格元素
+    category: "直接竞品"
+    our_price: 9999    # 我们的对标价格（元/年）
+
+  - id: "prod_002"
+    name: "竞品B - 专业版月度订阅"
+    url: "https://competitor-b.com/pricing"
+    selector: ".pro-plan .price"
+    category: "直接竞品"
+    our_price: 99
+
+  - id: "prod_003"
+    name: "竞品C - 团队版"
+    url: "https://competitor-c.com/pricing"
+    selector: "#team-pricing .value"
+    category: "间接竞品"
+    our_price: 4999
+
+  - id: "prod_004"
+    name: "关注商品 - MacBook Pro M4"
+    url: "https://www.jd.com/product/xxxxxxx.html"
+    selector: ".p-price .price"
+    category: "个人关注"
+    target_price: 14999  # 目标价格，低于此价格时告警
+
+scraping:
+  method: "headless_browser"   # 使用无头浏览器处理JS渲染的页面
+  timeout: 30
+  retry: 3
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+  # 注意：请确保遵守目标网站的 robots.txt 和使用条款
+
+price_tracking:
+  storage:
+    type: json_file
+    path: "./data/price_history.json"
+    retention_days: 180  # 保留半年的价格历史
+
+  alerts:
+    # 竞品降价告警
+    competitor_price_drop:
+      condition: "price_change_percent < -5"
+      category: ["直接竞品", "间接竞品"]
+      prompt: |
+        竞品价格变动检测：
+
+        产品：{product_name}
+        原价：¥{old_price}
+        现价：¥{new_price}
+        变动幅度：{change_percent}%
+        我们的对标价格：¥{our_price}
+
+        请分析：
+        1. 这次降价可能的原因（促销/永久调价/清库存）
+        2. 对我们的影响
+        3. 建议的应对策略
+
+    # 竞品涨价告警
+    competitor_price_increase:
+      condition: "price_change_percent > 10"
+      category: ["直接竞品", "间接竞品"]
+      prompt: |
+        竞品涨价检测：
+
+        产品：{product_name}
+        原价：¥{old_price}
+        现价：¥{new_price}
+        变动幅度：{change_percent}%
+
+        请分析这是否意味着我们有提价空间。
+
+    # 个人关注商品目标价格告警
+    target_price_reached:
+      condition: "current_price <= target_price"
+      category: ["个人关注"]
+      message: "🛒 {product_name} 降价到 ¥{current_price}，已达到目标价格 ¥{target_price}，可以考虑入手！"
+
+weekly_analysis:
+  prompt: |
+    请根据以下一周的价格监控数据生成分析报告：
+
+    {weekly_price_data}
+
+    ## 报告结构
+    ### 1. 价格变动汇总
+    | 产品 | 上周价格 | 本周价格 | 变动 | 变动幅度 |
+
+    ### 2. 趋势分析
+    - 整体市场定价趋势（涨/跌/稳定）
+    - 是否有明显的促销周期特征
+
+    ### 3. 竞争力评估
+    - 我们的价格在市场中的定位
+    - 价格竞争力评分（1-10）
+
+    ### 4. 建议
+    - 定价策略建议（1-2条）
+    - 需要关注的竞品动向
+
+notification:
+  # 实时告警推送到 Telegram
+  realtime:
+    - type: telegram
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
+      chat_id: "${TELEGRAM_CHAT_ID}"
+
+  # 周报推送到邮件
+  weekly:
+    - type: email
+      recipients: ["product@company.com", "sales@company.com"]
+      subject: "竞品价格周报 | {start_date} - {end_date}"
+```
+
+### 搭建步骤
+
+1. 保存配置为 `competitor-price-monitor.yaml`
+2. 修改 `products` 列表为你要监控的产品，包括 URL 和价格元素的 CSS 选择器
+3. 可以使用浏览器的开发者工具（F12）找到价格元素的 CSS 选择器
+4. 配置通知渠道信息
+5. 运行 `openclaw skill install ./competitor-price-monitor.yaml`
+
+---
+
+## 工作流 4：自动化周报生成
+
+**场景**：每周自动汇总来自多个数据源的工作数据（Git 提交、项目管理工具、日历），生成结构化的工作周报，节省每周 1-2 小时的周报编写时间。
+
+**架构**：多数据源采集 → AI 汇总分析 → 格式化周报 → 推送/存档
+
+**预计搭建时间**：20 分钟
+
+### 完整配置
+
+```yaml
+name: auto-weekly-report
+description: 多数据源自动化工作周报生成
+version: "1.0.0"
+
+triggers:
+  # 每周五下午5点自动生成周报
+  - type: cron
+    schedule: "0 17 * * 5"
+    timezone: "Asia/Shanghai"
+
+settings:
+  model: gpt-4o
+  temperature: 0.4
+  max_tokens: 4000
+
+data_sources:
+  # 数据源1：Git 提交记录
+  git:
+    enabled: true
+    repos:
+      - path: "https://github.com/your-org/main-project"
+        name: "主项目"
+      - path: "https://github.com/your-org/api-service"
+        name: "API 服务"
+    author_email: "your-email@company.com"
+    lookback_days: 7
+
+  # 数据源2：项目管理工具（以 Linear 为例，也支持 Jira/Notion）
+  project_management:
+    enabled: true
+    platform: "linear"
+    api_key: "${LINEAR_API_KEY}"
+    team_id: "${LINEAR_TEAM_ID}"
+    lookback_days: 7
+    include:
+      - completed_issues    # 本周完成的任务
+      - in_progress_issues  # 进行中的任务
+      - created_issues      # 本周新建的任务
+
+  # 数据源3：日历事件
+  calendar:
+    enabled: true
+    platform: "google_calendar"
+    credentials: "${GOOGLE_CALENDAR_CREDENTIALS}"
+    calendar_id: "primary"
+    lookback_days: 7
+    filter:
+      exclude_patterns: ["午餐", "休息", "1:1"]  # 排除非工作相关事件
+
+  # 数据源4：文档编辑记录（Notion/飞书）
+  documents:
+    enabled: false  # 根据需要开启
+    platform: "notion"
+    api_key: "${NOTION_API_KEY}"
+    database_id: "${NOTION_DATABASE_ID}"
+
+report_generation:
+  prompt: |
+    请根据以下工作数据生成一份专业的工作周报。
+
+    ## 数据来源
+
+    ### Git 提交记录
+    {git_commits}
+
+    ### 任务管理
+    已完成：{completed_tasks}
+    进行中：{in_progress_tasks}
+    新建：{created_tasks}
+
+    ### 会议记录
+    {calendar_events}
+
+    ## 周报要求
+
+    请按以下格式生成周报：
+
+    ### 本周完成
+    - 按项目/模块分组
+    - 每条概述做了什么和达成的效果
+    - 提炼具体成果，不要简单罗列 commit message
+    - 控制在 5-8 条
+
+    ### 进行中
+    - 列出当前正在推进的重要事项
+    - 注明预计完成时间
+    - 如有阻塞，说明原因
+
+    ### 下周计划
+    - 基于进行中的任务和已知的会议安排，推断下周重点
+    - 3-5 条
+
+    ### 数据概览
+    | 指标 | 本周 |
+    | 代码提交次数 | {commit_count} |
+    | 完成任务数 | {completed_count} |
+    | 参加会议数 | {meeting_count} |
+
+    ## 写作风格
+    - 语言简洁专业，避免口语化
+    - 强调成果和价值，不仅仅描述过程
+    - 数据说话，尽量量化工作成果
+
+output:
+  formats:
+    # Markdown 格式（用于飞书/Notion 粘贴）
+    - type: markdown
+      path: "./reports/weekly_{date}.md"
+
+    # 纯文本（用于邮件正文）
+    - type: plain_text
+
+notification:
+  # 先发给自己审核
+  draft:
+    - type: telegram
+      bot_token: "${TELEGRAM_BOT_TOKEN}"
+      chat_id: "${TELEGRAM_CHAT_ID}"
+      message_prefix: "📝 本周周报草稿（请审核后转发）："
+
+  # 审核通过后发送（手动触发）
+  # final:
+  #   - type: email
+  #     recipients: ["manager@company.com"]
+  #     subject: "工作周报 | {name} | {start_date}-{end_date}"
+```
+
+### 搭建步骤
+
+1. 保存配置为 `auto-weekly-report.yaml`
+2. 配置你使用的数据源（至少启用一个）：
+   - Git：填写仓库地址和你的邮箱
+   - 项目管理：填写 API Key 和团队 ID
+   - 日历：配置 Google Calendar 授权
+3. 不使用的数据源将 `enabled` 设为 `false`
+4. 根据你的周报格式要求调整 `prompt` 中的模板
+5. 运行 `openclaw skill install ./auto-weekly-report.yaml`
+
+### 进阶技巧
+
+- **周报风格学习**：把你过去写的 5-10 份优质周报作为 Few-Shot 示例放在 Prompt 中，AI 会学习你的写作风格和侧重点
+- **团队周报汇总**：配置多个成员的数据源，自动生成团队周报
+- **OKR 关联**：在 Prompt 中注入本季度的 OKR，让 AI 在周报中自动关联工作项与 OKR 目标
+
+---
+
+## 工作流 5：社交媒体热点追踪
+
+**场景**：自动追踪微博、知乎、抖音等平台的热门话题，筛选与你的业务或兴趣相关的热点，及时发现营销机会或舆情风险。
+
+**架构**：多平台热榜采集 → AI 筛选与关联分析 → 分级推送
+
+**预计搭建时间**：15 分钟
+
+### 完整配置
+
+```yaml
+name: social-media-tracker
+description: 社交媒体热点追踪与智能分析
+version: "1.0.0"
+
+triggers:
+  # 工作时间每2小时检查一次
+  - type: cron
+    schedule: "0 8,10,12,14,16,18,20 * * *"
+    task: hot_topic_check
+    timezone: "Asia/Shanghai"
+
+  # 每天晚上10点生成当日热点总结
+  - type: cron
+    schedule: "0 22 * * *"
+    task: daily_summary
+
+settings:
+  model: gpt-4o
+  temperature: 0.3
+  max_tokens: 4000
+
+platforms:
+  weibo:
+    enabled: true
+    source: "hot_search_api"  # 微博热搜 API
+    api_config:
+      url: "https://weibo.com/ajax/side/hotSearch"
+      method: GET
+    max_items: 50
+
+  zhihu:
+    enabled: true
+    source: "hot_list_api"    # 知乎热榜 API
+    api_config:
+      url: "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total"
+      method: GET
+    max_items: 50
+
+  douyin:
+    enabled: true
+    source: "trending_api"    # 抖音热点 API
+    api_config:
+      url: "${DOUYIN_HOT_API}"
+      method: GET
+    max_items: 30
+
+  baidu:
+    enabled: true
+    source: "realtime_hot"    # 百度实时热点
+    api_config:
+      url: "https://top.baidu.com/api/board?platform=wise&tab=realtime"
+      method: GET
+    max_items: 30
+
+# 关注的领域和关键词
+interest_profile:
+  # 业务相关关键词
+  business_keywords:
+    - "人工智能"
+    - "AI"
+    - "ChatGPT"
+    - "大模型"
+    - "自动化"
+    - "SaaS"
+    - "开源"
+    - "程序员"
+    - "开发者"
+
+  # 品牌和竞品关键词
+  brand_keywords:
+    - "OpenClaw"
+    - "LangChain"
+    - "AutoGPT"
+    - "Dify"
+    - "Coze"
+
+  # 行业关键词
+  industry_keywords:
+    - "融资"
+    - "上市"
+    - "裁员"
+    - "收购"
+    - "开源协议"
+
+  # 负面舆情关键词（高优先级告警）
+  crisis_keywords:
+    - "数据泄露"
+    - "安全漏洞"
+    - "用户投诉"
+    - "下架"
+
+analysis:
+  # 第一步：相关性筛选
+  relevance_filter:
+    prompt: |
+      以下是从多个社交媒体平台采集的热门话题列表：
+
+      {hot_topics}
+
+      我的关注领域关键词：{keywords}
+
+      请从中筛选出与我的关注领域相关的话题，并按相关度从高到低排列。
+      对于每个相关话题，请说明它与哪个关键词相关，以及为什么值得关注。
+
+      输出格式（JSON）：
+      [
+        {
+          "topic": "话题标题",
+          "platform": "来源平台",
+          "heat_index": "热度指数",
+          "relevance_score": 1-10,
+          "related_keywords": ["关键词1", "关键词2"],
+          "reason": "值得关注的原因（一句话）",
+          "opportunity": "营销/内容机会（如有）",
+          "risk_level": "none/low/medium/high"
+          }
+      ]
+
+  # 第二步：深度分析（仅对高相关度话题）
+  deep_analysis:
+    trigger_condition: "relevance_score >= 7"
+    prompt: |
+      请对以下热门话题进行深度分析：
+
+      话题：{topic}
+      平台：{platform}
+      热度：{heat_index}
+
+      分析维度：
+      1. 话题背景：这个话题为什么火？背后的驱动因素是什么？
+      2. 发展趋势：这个话题可能持续多久？会如何演化？
+      3. 业务关联：与我们的产品/服务有什么关联？
+      4. 行动建议：我们应该如何回应？
+         - 内容营销机会（建议的文章/视频选题）
+         - 产品优化方向（如果与产品功能相关）
+         - 舆情应对（如果涉及风险）
+
+  # 每日总结
+  daily_summary:
+    prompt: |
+      请根据今日所有热点追踪数据生成一份简洁的日报：
+
+      {today_data}
+
+      输出格式：
+      ## 今日社交媒体热点日报 | {date}
+
+      ### 与我们高度相关的热点（{count}条）
+      （列出相关度 >= 7 的话题，附简要分析）
+
+      ### 行业趋势观察
+      （基于今日热点总结 2-3 个行业趋势信号）
+
+      ### 建议行动项
+      - 内容机会：（建议追的热点和选题角度）
+      - 需要关注：（潜在风险或竞品动向）
+
+      ### 今日热点词云
+      （列出出现频率最高的 10 个关键词）
+
+notification:
+  # 高相关度热点实时推送
+  realtime:
+    condition: "relevance_score >= 8 or risk_level in ['medium', 'high']"
+    channels:
+      - type: telegram
+        bot_token: "${TELEGRAM_BOT_TOKEN}"
+        chat_id: "${TELEGRAM_CHAT_ID}"
+
+  # 舆情危机立即电话告警
+  crisis:
+    condition: "risk_level == 'high'"
+    channels:
+      - type: telegram
+        bot_token: "${TELEGRAM_BOT_TOKEN}"
+        chat_id: "${TELEGRAM_CHAT_ID}"
+        message_prefix: "🚨 舆情预警："
+      - type: webhook
+        url: "${ALERT_WEBHOOK_URL}"
+
+  # 日报推送
+  daily:
+    channels:
+      - type: telegram
+        bot_token: "${TELEGRAM_BOT_TOKEN}"
+        chat_id: "${TELEGRAM_CHAT_ID}"
+      - type: email
+        recipients: ["marketing@company.com"]
+
+storage:
+  type: json_file
+  path: "./data/social_media_tracking.json"
+  retention_days: 30
+```
+
+### 搭建步骤
+
+1. 保存配置为 `social-media-tracker.yaml`
+2. 根据你的关注领域修改 `interest_profile` 中的关键词列表
+3. 配置各平台的 API 信息（部分平台可能需要申请 API 权限）
+4. 设置通知渠道
+5. 运行 `openclaw skill install ./social-media-tracker.yaml`
+
+### 使用建议
+
+- 关键词列表不宜过多，控制在 20-30 个以内，太多会导致筛选结果过于发散
+- 每周回顾一次追踪效果，优化关键词列表——移除命中率低的词，补充新发现的相关词
+- 对于品牌相关的舆情监控，建议将检查频率提高到每小时一次
+
+---
+
+## 总结与进阶
+
+以上 5 个工作流覆盖了信息获取、数据监控、商业分析、工作管理和市场洞察五个高频场景。它们的共同特点是：
+
+1. **配置即用**：不需要写代码，只需修改 YAML 配置中的参数
+2. **AI 增强**：不是简单的数据搬运，而是通过 AI 进行筛选、分析和总结
+3. **可组合**：多个工作流可以串联使用，比如"热点追踪"的输出可以作为"公众号自动发布"的选题输入
+
+搭建好这些工作流后，你可以进一步探索以下进阶方向：
+
+- **工作流串联**：将多个 Skill 通过事件机制串联为更复杂的自动化流水线
+- **自定义数据源**：接入你特定业务场景的数据源（如内部系统 API、数据库等）
+- **多人协作**：将工作流的通知和审核分发给团队的不同成员
+- **数据可视化**：将监控数据接入 Grafana 等可视化工具，搭建实时看板
+
+如果你在搭建过程中遇到任何问题，欢迎在社区提问。同时也欢迎将你自己搭建的有趣工作流分享到 Skill 市场，帮助更多人提升效率。

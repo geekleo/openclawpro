@@ -1,0 +1,100 @@
+---
+title: "用 OpenClaw 做自动化 Code Review"
+description: "技术团队使用 OpenClaw 的 GitHub Skill 实现 PR 自动审查，通过规则模板和 AI 分析自动识别代码问题并评论，Review 效率提升60%"
+category: "developer"
+tags: ["Code Review", "GitHub", "CI/CD", "代码质量"]
+metrics: "Review效率提升60%"
+---
+
+## 场景痛点
+
+陈涛带领一个 12 人的后端开发团队，负责公司核心交易系统的开发和维护。团队每天产出 15 到 20 个 Pull Request，每个 PR 平均修改 200 到 500 行代码。按照公司规范，每个 PR 必须经过至少两位高级工程师的 Code Review 才能合入主分支。
+
+这套流程在理论上很完美，但实际执行中暴露了严重问题：
+
+**Review 积压严重。** 两位高级工程师同时也是核心开发者，每天只能抽出 2 到 3 小时做 Review。按每个 PR 平均 20 分钟计算，每天最多 Review 9 个 PR，剩下的只能排队。积压最严重时有 30 多个 PR 等待 Review，平均等待时间超过 2 天。
+
+**Review 质量参差不齐。** 疲劳 Review 导致质量下降。当积压到后期，Reviewer 为了赶进度，往往只做粗略浏览就批准了。有一次，一个包含 SQL 注入漏洞的 PR 就这样溜过了 Review，在预发环境被安全扫描工具发现。
+
+**低级问题消耗高级人力。** 大量 Review 意见集中在代码风格、命名规范、日志格式等低级问题上。这些完全可以自动化检查，却占据了 Reviewer 约 40% 的时间。
+
+**跨模块 Review 缺乏上下文。** 当 Reviewer 不熟悉某个模块时，很难判断代码改动的合理性。但让模块 Owner 来 Review 又增加了协调成本。
+
+## 解决方案
+
+我们使用 OpenClaw 构建了一个三层自动化 Code Review 系统：
+
+**第一层：静态规则检查。** OpenClaw 通过 GitHub Skill 监听所有新建 PR 的 Webhook 事件。收到事件后，自动拉取 PR 的 diff 内容，按预定义的规则进行静态检查。规则覆盖以下维度：代码风格（命名规范、缩进、注释格式）、安全风险（SQL 拼接、硬编码密钥、未校验输入）、性能隐患（N+1 查询、大循环内的数据库调用、未加索引的查询条件）、错误处理（未捕获异常、空指针风险、资源未释放）。
+
+**第二层：AI 语义分析。** 对通过第一层检查的代码，OpenClaw 进行更深层的语义级分析。AI 会结合 PR 描述、关联 Issue 和代码上下文，评估以下内容：变更是否符合 PR 描述的意图、是否存在逻辑错误或边界条件遗漏、是否遵循了项目的架构模式、是否有更优的实现方式。
+
+**第三层：自动评论与报告。** 分析结果自动以 Review Comment 的形式发布在 PR 上。每条评论包含：问题描述、严重程度（Critical / Warning / Suggestion）、代码位置（精确到行号）、修复建议。同时生成一份 Summary Comment 作为整体评估报告。
+
+严重程度分类标准：
+- **Critical**：安全漏洞、数据丢失风险、线上必崩——自动标记为 Request Changes，阻止合入
+- **Warning**：性能问题、错误处理不完善、潜在 Bug——标记后需人工确认
+- **Suggestion**：代码优化建议、更好的命名、设计模式推荐——仅供参考，不阻塞
+
+## 关键配置
+
+```yaml
+name: "自动化 Code Review"
+trigger:
+  event: "pull_request"
+  actions: ["opened", "synchronize"]
+
+skills:
+  - github:
+      token: "${GITHUB_TOKEN}"
+      repo: "company/trading-system"
+      permissions: ["pull_requests", "contents"]
+
+review_rules:
+  security:
+    - pattern: "String\\.format.*SQL|\\+.*SQL|sql.*\\+"
+      severity: "critical"
+      message: "检测到 SQL 拼接，存在注入风险。请使用参数化查询。"
+    - pattern: "password|secret|api_key.*=.*[\"']\\w+"
+      severity: "critical"
+      message: "检测到硬编码密钥，请使用环境变量或密钥管理服务。"
+  performance:
+    - pattern: "for.*\\{[\\s\\S]*?(find|query|select).*\\}"
+      severity: "warning"
+      message: "检测到循环内的数据库查询，可能存在N+1问题。"
+  error_handling:
+    - pattern: "catch.*\\{\\s*\\}"
+      severity: "warning"
+      message: "空的 catch 块会吞掉异常，请添加日志记录或异常处理。"
+
+ai_analysis:
+  context_files: 5  # 分析变更文件的上下游5个关联文件
+  check_items:
+    - "逻辑正确性和边界条件"
+    - "是否符合现有架构模式"
+    - "并发安全性"
+    - "接口兼容性（是否有 breaking change）"
+
+ci_integration:
+  required_status: "openclaw-review"
+  block_on_critical: true
+  auto_approve_on_clean: false  # 即使没有问题也不自动approve
+```
+
+与 CI 流水线的集成方式：在 GitHub Actions 工作流中添加一个 `openclaw-review` 步骤作为必需检查。只有 OpenClaw Review 通过（无 Critical 级别问题）后，PR 才被允许进入人工 Review 阶段。这确保了人工 Reviewer 看到的 PR 已经过了一轮高质量筛查。
+
+## 效果数据
+
+这套系统在团队中运行了 4 个月，以下是核心指标变化：
+
+| 指标 | 改进前 | 改进后 | 变化幅度 |
+|------|--------|--------|---------|
+| 人工 Review 平均耗时 | 20 分钟/PR | 8 分钟/PR | 减少 60% |
+| PR 平均等待时间 | 2 天 | 4 小时 | 缩短 91% |
+| 线上缺陷逃逸率 | 每月 5-8 个 | 每月 3 个 | 减少 40%+ |
+| 安全漏洞逃逸 | 每季度 1-2 个 | 0 个 | 降至 0 |
+| Review 积压 PR 数 | 平均 15 个 | 平均 3 个 | 减少 80% |
+| 低级问题 Review 意见占比 | 40% | 5% | 减少 87.5% |
+
+最有说服力的案例：上线第二周，系统在一个看似普通的 PR 中发现了一处并发安全问题——在高并发场景下可能导致账户余额计算错误。这个问题在两位高级工程师的手动 Review 中被遗漏了，因为它隐藏在一段看起来没问题的锁逻辑中。OpenClaw 通过分析上下文关联代码发现了这个隐患，避免了一次潜在的资金事故。
+
+陈涛表示："OpenClaw 不是替代人工 Review，而是帮 Reviewer 过滤噪音、发现盲区。高级工程师现在可以专注于架构合理性和业务逻辑的审查，这才是他们最有价值的地方。"

@@ -1,0 +1,1137 @@
+---
+title: "日志监控与智能告警"
+description: "全面介绍 OpenClaw 的日志系统架构、日志收集配置（stdout 到文件到集中化管理）、Prometheus 与 Grafana 监控搭建、关键指标定义（CPU 内存 API 延迟和错误率）、告警规则配置、集成 Telegram 和钉钉告警推送、Uptime 监控、日志分析与故障排查以及 Dashboard 配置示例"
+category: "安全与运维篇"
+tags: ["监控", "日志", "告警", "Prometheus"]
+date: "2026-01-30"
+---
+
+## OpenClaw 日志系统架构
+
+一个完善的日志和监控体系是生产环境运维的核心基础设施。它能帮助你实时掌握系统健康状态、快速定位故障根因、发现性能瓶颈、验证变更效果。OpenClaw 的日志和监控架构分为三个层次：采集层、存储层和展示层。
+
+```
+┌───────────────────────────────────────────────────────────┐
+│                    展示与告警层                              │
+│   ┌──────────┐  ┌─────────────┐  ┌──────────────────┐    │
+│   │  Grafana  │  │ AlertManager│  │ Telegram/DingTalk│    │
+│   │ Dashboard │  │  告警路由     │  │    告警推送       │    │
+│   └─────┬────┘  └──────┬──────┘  └────────┬─────────┘    │
+├─────────┼──────────────┼──────────────────┼───────────────┤
+│         │      存储与查询层                  │               │
+│   ┌─────┴────┐  ┌──────┴──────┐            │              │
+│   │Prometheus│  │    Loki     │            │              │
+│   │ 指标存储  │  │  日志聚合    │            │              │
+│   └─────┬────┘  └──────┬──────┘            │              │
+├─────────┼──────────────┼───────────────────┼──────────────┤
+│         │       采集层  │                    │              │
+│   ┌─────┴────────┐ ┌──┴────────┐  ┌──────┴──────┐       │
+│   │ Node Exporter│ │  Promtail │  │ cAdvisor    │       │
+│   │  系统指标     │ │  日志采集   │  │ 容器指标     │       │
+│   └──────────────┘ └───────────┘  └─────────────┘       │
+│                                                           │
+│   ┌──────────────────────────────────────────────────┐   │
+│   │              OpenClaw Application                 │   │
+│   │  stdout/stderr → JSON logs → /var/log/openclaw/  │   │
+│   └──────────────────────────────────────────────────┘   │
+└───────────────────────────────────────────────────────────┘
+```
+
+## 日志收集配置
+
+### 日志级别与格式
+
+OpenClaw 使用结构化 JSON 日志格式，便于机器解析和全文检索：
+
+```json
+{
+  "timestamp": "2026-01-30T10:15:30.123Z",
+  "level": "info",
+  "service": "openclaw",
+  "module": "agent-runtime",
+  "traceId": "abc123def456",
+  "message": "Agent 任务执行完成",
+  "context": {
+    "agentId": "code-reviewer",
+    "taskId": "task-789",
+    "duration": 3420,
+    "tokensUsed": 2850,
+    "model": "claude-sonnet-4-20250514"
+  }
+}
+```
+
+在 OpenClaw 配置中设置日志级别和输出：
+
+```yaml
+# config/logging.yaml
+
+logging:
+  # 全局日志级别: debug, info, warn, error
+  level: "info"
+
+  # 模块级别覆盖
+  modules:
+    agent-runtime: "info"
+    mcp-client: "warn"
+    skill-runtime: "info"
+    http-server: "info"
+    database: "warn"
+
+  # 输出目标
+  outputs:
+    # 标准输出（Docker 日志驱动收集）
+    stdout:
+      enabled: true
+      format: "json"
+
+    # 文件输出（本地持久化）
+    file:
+      enabled: true
+      path: "/var/log/openclaw/app.log"
+      format: "json"
+      rotation:
+        max_size: "100MB"
+        max_files: 10
+        max_age: "30d"
+        compress: true
+
+  # 敏感信息过滤
+  redaction:
+    enabled: true
+    fields:
+      - "password"
+      - "apiKey"
+      - "token"
+      - "authorization"
+    replacement: "***REDACTED***"
+```
+
+### Docker 日志驱动配置
+
+在 Docker Compose 中配置日志驱动，将日志转发到集中化存储：
+
+```yaml
+# docker-compose.monitoring.yml
+
+version: "3.8"
+
+services:
+  openclaw:
+    image: openclaw/openclaw:2026.2
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        tag: "openclaw-app"
+    labels:
+      - "logging=enabled"
+      - "service=openclaw"
+
+  # Promtail - 日志采集器
+  promtail:
+    image: grafana/promtail:2.9.4
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./config/promtail.yaml:/etc/promtail/config.yaml:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+    networks:
+      - monitoring
+
+  # Loki - 日志聚合
+  loki:
+    image: grafana/loki:2.9.4
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+      - ./config/loki.yaml:/etc/loki/config.yaml:ro
+    command: -config.file=/etc/loki/config.yaml
+    networks:
+      - monitoring
+
+volumes:
+  loki-data:
+
+networks:
+  monitoring:
+    driver: bridge
+```
+
+Promtail 配置文件：
+
+```yaml
+# config/promtail.yaml
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # 从 Docker 容器收集日志
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=enabled"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_label_service']
+        target_label: 'service'
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            message: message
+            module: module
+            traceId: traceId
+      - labels:
+          level:
+          module:
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+
+  # 从文件收集日志
+  - job_name: openclaw-files
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: openclaw
+          __path__: /var/log/openclaw/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            message: message
+      - labels:
+          level:
+```
+
+## Prometheus + Grafana 监控搭建
+
+### 完整的 Docker Compose 监控栈
+
+```yaml
+# docker-compose.monitoring-stack.yml
+
+version: "3.8"
+
+services:
+  # Prometheus - 指标存储与查询
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    restart: always
+    networks:
+      - monitoring
+
+  # Grafana - 可视化面板
+  grafana:
+    image: grafana/grafana:10.3.1
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.example.com
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: always
+    networks:
+      - monitoring
+
+  # AlertManager - 告警管理
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    restart: always
+    networks:
+      - monitoring
+
+  # Node Exporter - 系统指标采集
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: always
+    networks:
+      - monitoring
+
+  # cAdvisor - 容器指标采集
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: always
+    networks:
+      - monitoring
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge
+```
+
+### Prometheus 配置文件
+
+```yaml
+# config/prometheus.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    cluster: "openclaw-prod"
+    environment: "production"
+
+# 告警规则文件
+rule_files:
+  - "alert-rules.yml"
+
+# AlertManager 配置
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# 指标采集目标
+scrape_configs:
+  # Prometheus 自身
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # OpenClaw 应用指标
+  - job_name: "openclaw"
+    metrics_path: "/metrics"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["openclaw:8080"]
+        labels:
+          service: "openclaw"
+          instance: "main"
+
+  # Node Exporter（系统指标）
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: "openclaw-host"
+
+  # cAdvisor（容器指标）
+  - job_name: "cadvisor"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # PostgreSQL Exporter
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          service: "postgresql"
+
+  # Redis Exporter
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: "redis"
+
+  # Nginx Exporter
+  - job_name: "nginx"
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+        labels:
+          service: "nginx"
+```
+
+## 关键监控指标
+
+OpenClaw 生产环境需要重点监控以下指标：
+
+| 指标类型 | 指标名称 | 告警阈值 | 说明 |
+|---------|---------|---------|------|
+| 系统 | CPU 使用率 | > 80% 持续 5 分钟 | 可能需要扩容 |
+| 系统 | 内存使用率 | > 85% 持续 5 分钟 | 内存泄漏风险 |
+| 系统 | 磁盘使用率 | > 90% | 需要清理或扩容 |
+| 应用 | API 请求延迟 P95 | > 5s | 性能退化 |
+| 应用 | API 错误率 | > 5% | 服务异常 |
+| 应用 | 活跃连接数 | > 1000 | 连接池压力 |
+| 应用 | Token 消耗速率 | 超过日预算 80% | 成本风控 |
+| 数据库 | 连接数 | > 最大连接的 80% | 连接池耗尽 |
+| 数据库 | 查询延迟 P95 | > 1s | 慢查询 |
+| 容器 | 重启次数 | > 3 次 / 小时 | 应用不稳定 |
+
+## 告警规则配置
+
+```yaml
+# config/alert-rules.yml
+
+groups:
+  - name: openclaw-system
+    interval: 30s
+    rules:
+      # CPU 使用率过高
+      - alert: HighCpuUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "CPU 使用率过高"
+          description: "实例 {{ $labels.instance }} CPU 使用率达到 {{ $value | printf \"%.1f\" }}%，持续超过 5 分钟"
+
+      # 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "内存使用率过高"
+          description: "实例 {{ $labels.instance }} 内存使用率达到 {{ $value | printf \"%.1f\" }}%"
+
+      # 磁盘空间不足
+      - alert: DiskSpaceLow
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 > 90
+        for: 1m
+        labels:
+          severity: critical
+          service: openclaw
+        annotations:
+          summary: "磁盘空间严重不足"
+          description: "磁盘使用率达到 {{ $value | printf \"%.1f\" }}%，请立即处理"
+
+  - name: openclaw-application
+    interval: 15s
+    rules:
+      # API 延迟过高
+      - alert: HighApiLatency
+        expr: histogram_quantile(0.95, rate(openclaw_http_request_duration_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "API 响应延迟过高"
+          description: "P95 延迟达到 {{ $value | printf \"%.2f\" }} 秒"
+
+      # API 错误率过高
+      - alert: HighErrorRate
+        expr: sum(rate(openclaw_http_requests_total{status=~"5.."}[5m])) / sum(rate(openclaw_http_requests_total[5m])) * 100 > 5
+        for: 3m
+        labels:
+          severity: critical
+          service: openclaw
+        annotations:
+          summary: "API 错误率过高"
+          description: "5xx 错误率达到 {{ $value | printf \"%.1f\" }}%"
+
+      # 服务不可用
+      - alert: ServiceDown
+        expr: up{job="openclaw"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: openclaw
+        annotations:
+          summary: "OpenClaw 服务不可用"
+          description: "OpenClaw 主服务已停止响应，请立即检查"
+
+      # Agent 执行超时
+      - alert: AgentExecutionTimeout
+        expr: rate(openclaw_agent_execution_timeout_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "Agent 执行超时频繁"
+          description: "Agent 超时率: {{ $value | printf \"%.2f\" }} 次/秒"
+
+      # Token 消耗过快
+      - alert: HighTokenConsumption
+        expr: sum(increase(openclaw_token_usage_total[1h])) > 100000
+        for: 0m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "Token 消耗速率异常"
+          description: "过去 1 小时消耗 {{ $value | printf \"%.0f\" }} tokens"
+
+  - name: openclaw-database
+    interval: 30s
+    rules:
+      # 数据库连接数过高
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "数据库连接数过高"
+          description: "当前活跃连接: {{ $value }}"
+
+      # 慢查询
+      - alert: SlowQueries
+        expr: rate(pg_stat_activity_max_tx_duration{datname="openclaw"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "检测到慢查询"
+          description: "数据库存在长时间运行的查询"
+
+  - name: openclaw-containers
+    interval: 30s
+    rules:
+      # 容器频繁重启
+      - alert: ContainerRestartFrequent
+        expr: increase(container_restart_count{name=~"openclaw.*"}[1h]) > 3
+        for: 0m
+        labels:
+          severity: critical
+          service: openclaw
+        annotations:
+          summary: "容器频繁重启"
+          description: "容器 {{ $labels.name }} 在过去 1 小时内重启了 {{ $value }} 次"
+
+      # 容器内存超限
+      - alert: ContainerMemoryOverLimit
+        expr: container_memory_usage_bytes{name=~"openclaw.*"} / container_spec_memory_limit_bytes{name=~"openclaw.*"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: openclaw
+        annotations:
+          summary: "容器内存接近上限"
+          description: "容器 {{ $labels.name }} 内存使用率达到 {{ $value | printf \"%.1f\" }}%"
+```
+
+## AlertManager 配置
+
+```yaml
+# config/alertmanager.yml
+
+global:
+  resolve_timeout: 5m
+
+# 告警路由
+route:
+  group_by: ['alertname', 'service']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+
+  routes:
+    # 严重告警：立即发送到 Telegram 和钉钉
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # 警告级别：发送到钉钉
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 1m
+      repeat_interval: 4h
+
+# 告警接收器
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://alert-bridge:9095/dingtalk'
+
+  - name: 'critical-alerts'
+    webhook_configs:
+      # Telegram Bot 告警
+      - url: 'http://alert-bridge:9095/telegram'
+        send_resolved: true
+      # 钉钉告警
+      - url: 'http://alert-bridge:9095/dingtalk'
+        send_resolved: true
+
+  - name: 'warning-alerts'
+    webhook_configs:
+      - url: 'http://alert-bridge:9095/dingtalk'
+        send_resolved: true
+
+# 抑制规则（避免告警风暴）
+inhibit_rules:
+  # 当 critical 告警触发时，抑制相同服务的 warning 告警
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['service']
+```
+
+## 集成 Telegram / 钉钉告警推送
+
+由于 AlertManager 不直接支持 Telegram 和钉钉，需要一个告警桥接服务：
+
+```typescript
+// alert-bridge/src/index.ts
+// 告警桥接服务：将 AlertManager Webhook 转发到 Telegram 和钉钉
+
+import http from 'node:http';
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const DINGTALK_WEBHOOK = process.env.DINGTALK_WEBHOOK || '';
+const DINGTALK_SECRET = process.env.DINGTALK_SECRET || '';
+
+interface AlertManagerPayload {
+  status: 'firing' | 'resolved';
+  alerts: Array<{
+    status: string;
+    labels: Record<string, string>;
+    annotations: Record<string, string>;
+    startsAt: string;
+    endsAt: string;
+  }>;
+}
+
+// 格式化告警消息
+function formatAlert(payload: AlertManagerPayload): string {
+  const { status, alerts } = payload;
+  const emoji = status === 'firing' ? '🔴' : '✅';
+  const statusText = status === 'firing' ? '触发' : '已恢复';
+
+  const lines = [`${emoji} 告警${statusText} (${alerts.length} 条)`];
+  lines.push(`时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`);
+  lines.push('');
+
+  for (const alert of alerts) {
+    lines.push(`📋 ${alert.labels.alertname}`);
+    lines.push(`   严重等级: ${alert.labels.severity}`);
+    lines.push(`   服务: ${alert.labels.service || 'unknown'}`);
+    if (alert.annotations.summary) {
+      lines.push(`   摘要: ${alert.annotations.summary}`);
+    }
+    if (alert.annotations.description) {
+      lines.push(`   详情: ${alert.annotations.description}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+// 发送到 Telegram
+async function sendTelegram(message: string): Promise<void> {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: TELEGRAM_CHAT_ID,
+      text: message,
+      parse_mode: 'HTML',
+    }),
+  });
+}
+
+// 发送到钉钉
+async function sendDingTalk(message: string): Promise<void> {
+  // 计算签名
+  const timestamp = Date.now();
+  const crypto = await import('node:crypto');
+  const stringToSign = `${timestamp}\n${DINGTALK_SECRET}`;
+  const sign = encodeURIComponent(
+    crypto.createHmac('sha256', DINGTALK_SECRET)
+      .update(stringToSign)
+      .digest('base64')
+  );
+
+  const url = `${DINGTALK_WEBHOOK}&timestamp=${timestamp}&sign=${sign}`;
+  await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      msgtype: 'text',
+      text: { content: message },
+    }),
+  });
+}
+
+// HTTP 服务器
+const server = http.createServer(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.writeHead(405);
+    res.end('Method Not Allowed');
+    return;
+  }
+
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', async () => {
+    try {
+      const payload: AlertManagerPayload = JSON.parse(body);
+      const message = formatAlert(payload);
+
+      if (req.url === '/telegram') {
+        await sendTelegram(message);
+      } else if (req.url === '/dingtalk') {
+        await sendDingTalk(message);
+      } else {
+        // 默认发送到所有渠道
+        await Promise.allSettled([
+          sendTelegram(message),
+          sendDingTalk(message),
+        ]);
+      }
+
+      res.writeHead(200);
+      res.end('OK');
+    } catch (error) {
+      console.error('处理告警失败:', error);
+      res.writeHead(500);
+      res.end('Internal Server Error');
+    }
+  });
+});
+
+server.listen(9095, () => {
+  console.log('Alert Bridge 服务已启动，监听端口 9095');
+});
+```
+
+## Uptime 监控
+
+配置外部 Uptime 监控，确保服务可用性从外部视角也能被检测到：
+
+```yaml
+# config/uptime-kuma.yml (通过 Docker 部署 Uptime Kuma)
+
+# docker-compose.uptime.yml
+version: "3.8"
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23
+    ports:
+      - "3001:3001"
+    volumes:
+      - uptime-data:/app/data
+    restart: always
+
+volumes:
+  uptime-data:
+```
+
+推荐配置的监控探针：
+
+```
+监控探针列表：
+─────────────────────────────────────────────────
+名称                   类型          间隔    超时
+─────────────────────────────────────────────────
+OpenClaw API           HTTP(s)      60s     10s
+  URL: https://openclaw.example.com/health
+  预期状态码: 200
+  预期关键字: "status":"ok"
+
+OpenClaw WebSocket     TCP/Ping     60s     10s
+  主机: openclaw.example.com
+  端口: 443
+
+PostgreSQL             TCP          120s    5s
+  主机: db-host
+  端口: 5432
+
+Redis                  TCP          120s    5s
+  主机: redis-host
+  端口: 6379
+
+SSL 证书有效期          HTTP(s)      86400s  30s
+  URL: https://openclaw.example.com
+  证书过期天数告警: 14
+─────────────────────────────────────────────────
+```
+
+## 日志分析与故障排查
+
+### 常用排查命令
+
+```bash
+# 查看 OpenClaw 实时日志
+docker logs -f openclaw-openclaw-1 --tail 100
+
+# 按错误级别过滤
+docker logs openclaw-openclaw-1 2>&1 | jq 'select(.level == "error")'
+
+# 查看特定时间范围的错误
+docker logs openclaw-openclaw-1 --since "2026-01-30T10:00:00" --until "2026-01-30T11:00:00" 2>&1 \
+  | jq 'select(.level == "error") | {time: .timestamp, msg: .message, ctx: .context}'
+
+# 统计各级别日志数量
+docker logs openclaw-openclaw-1 2>&1 | jq -r '.level' | sort | uniq -c | sort -rn
+
+# 查看最近的 Agent 执行错误
+docker logs openclaw-openclaw-1 2>&1 \
+  | jq 'select(.module == "agent-runtime" and .level == "error") | {time: .timestamp, agent: .context.agentId, error: .message}'
+
+# 查看 API 慢请求（超过 3 秒）
+docker logs openclaw-openclaw-1 2>&1 \
+  | jq 'select(.module == "http-server" and .context.duration > 3000) | {path: .context.path, duration: .context.duration, time: .timestamp}'
+
+# 使用 Loki LogQL 查询（通过 Grafana 或 logcli）
+# 查看最近 1 小时的错误日志
+logcli query '{service="openclaw"} |= "error"' --since=1h --limit=50
+
+# 按 traceId 追踪完整请求链路
+logcli query '{service="openclaw"} | json | traceId="abc123def456"' --since=24h
+```
+
+## Grafana Dashboard 配置
+
+以下是一个完整的 OpenClaw 监控 Dashboard JSON 配置：
+
+```json
+{
+  "dashboard": {
+    "id": null,
+    "uid": "openclaw-overview",
+    "title": "OpenClaw 监控总览",
+    "timezone": "Asia/Shanghai",
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "服务状态",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "up{job=\"openclaw\"}",
+            "legendFormat": "OpenClaw"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" } } },
+              { "type": "value", "options": { "1": { "text": "UP", "color": "green" } } }
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "API 请求速率",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+        "targets": [
+          {
+            "expr": "sum(rate(openclaw_http_requests_total[5m])) by (status)",
+            "legendFormat": "HTTP {{status}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2,
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "API 延迟分布",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(openclaw_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.90, rate(openclaw_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P90"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(openclaw_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(openclaw_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "P99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {
+              "drawStyle": "line",
+              "lineWidth": 2
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "CPU 使用率",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+        "targets": [
+          {
+            "expr": "100 - (avg(irate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 60, "color": "yellow" },
+                { "value": 80, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "内存使用率",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+        "targets": [
+          {
+            "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 70, "color": "yellow" },
+                { "value": 85, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Token 消耗趋势",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+        "targets": [
+          {
+            "expr": "sum(increase(openclaw_token_usage_total[1h]))",
+            "legendFormat": "每小时 Token 消耗"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "drawStyle": "bars",
+              "fillOpacity": 50
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Agent 执行统计",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+        "targets": [
+          {
+            "expr": "sum(rate(openclaw_agent_execution_total[5m])) by (status)",
+            "legendFormat": "{{ status }}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "fillOpacity": 20,
+              "stacking": { "mode": "normal" }
+            }
+          },
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "error" },
+              "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+            },
+            {
+              "matcher": { "id": "byName", "options": "success" },
+              "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+            }
+          ]
+        }
+      },
+      {
+        "id": 8,
+        "title": "错误率",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(rate(openclaw_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(openclaw_http_requests_total[5m])) * 100"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "decimals": 2,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 1, "color": "yellow" },
+                { "value": 5, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "容器资源使用",
+        "type": "table",
+        "gridPos": { "h": 6, "w": 24, "x": 0, "y": 20 },
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{name=~\"openclaw.*\"} / 1024 / 1024",
+            "legendFormat": "{{ name }} 内存(MB)",
+            "instant": true
+          },
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{name=~\"openclaw.*\"}[5m]) * 100",
+            "legendFormat": "{{ name }} CPU(%)",
+            "instant": true
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "interval",
+          "type": "interval",
+          "options": [
+            { "text": "1m", "value": "1m" },
+            { "text": "5m", "value": "5m" },
+            { "text": "15m", "value": "15m" },
+            { "text": "1h", "value": "1h" }
+          ],
+          "current": { "text": "5m", "value": "5m" }
+        }
+      ]
+    }
+  }
+}
+```
+
+### 导入 Dashboard
+
+将上面的 JSON 保存为 `openclaw-dashboard.json`，然后通过 Grafana API 导入：
+
+```bash
+# 通过 API 导入 Dashboard
+curl -X POST \
+  http://admin:${GRAFANA_PASSWORD}@localhost:3000/api/dashboards/db \
+  -H "Content-Type: application/json" \
+  -d @openclaw-dashboard.json
+
+# 或者通过 Grafana UI 导入：
+# 1. 打开 Grafana → Dashboards → Import
+# 2. 上传 JSON 文件或粘贴 JSON 内容
+# 3. 选择 Prometheus 数据源
+# 4. 点击 Import
+```
+
+## 总结
+
+通过本教程搭建的监控体系，你将获得以下能力：
+
+1. **实时日志收集**：通过 Promtail + Loki 实现所有日志的集中化管理
+2. **全方位指标监控**：Prometheus 采集系统、应用、数据库、容器的全维度指标
+3. **可视化仪表盘**：Grafana Dashboard 提供直观的运行状态展示
+4. **智能告警**：基于规则的告警配置，通过 Telegram 和钉钉实时推送
+5. **Uptime 监控**：从外部视角持续检测服务可用性
+6. **故障排查**：结构化日志和链路追踪加速问题定位
+
+建议在部署完成后进行一次完整的告警测试（手动触发各级别告警），确认所有通知渠道正常工作。日常运维中养成每天查看 Dashboard 的习惯，对异常趋势保持敏感，将问题消灭在萌芽阶段。

@@ -1,0 +1,531 @@
+---
+title: "Telegram Bot 完整配置指南"
+description: "从零创建 Telegram Bot 并与 OpenClaw 集成，涵盖 BotFather 创建流程、消息发送与接收、群组管理、Inline Keyboard 交互、定时推送及安全配置"
+category: "消息平台篇"
+tags: ["Telegram", "Bot", "消息推送", "自动化"]
+date: "2026-02-20"
+---
+
+## 前言
+
+Telegram 是全球最流行的即时通讯应用之一，其强大的 Bot API 使其成为 AI Agent 最理想的消息平台之一。通过将 OpenClaw 与 Telegram Bot 集成，你可以实现通过 Telegram 对话直接调用 AI Agent、接收自动通知、管理群组等丰富功能。
+
+本教程将手把手带你完成从创建 Bot 到高级交互功能的全部配置。
+
+## 一、创建 Telegram Bot
+
+### 通过 @BotFather 创建
+
+BotFather 是 Telegram 官方的 Bot 管理工具。所有 Bot 的创建和管理都通过它完成。
+
+**创建步骤：**
+
+1. 在 Telegram 中搜索 `@BotFather` 并打开对话
+2. 发送 `/newbot` 命令
+3. BotFather 会要求你输入 Bot 的显示名称（例如：`My OpenClaw Agent`）
+4. 接着输入 Bot 的用户名，必须以 `bot` 结尾（例如：`my_openclaw_bot`）
+5. 创建成功后，BotFather 会返回一个 **Bot Token**
+
+```
+# BotFather 返回的消息示例：
+Done! Congratulations on your new bot. You will find it at t.me/my_openclaw_bot.
+Use this token to access the HTTP API:
+7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+For a description of the Bot API, see: https://core.telegram.org/bots/api
+```
+
+**务必妥善保管 Bot Token，它相当于 Bot 的密码。**
+
+### 配置 Bot 基本信息
+
+继续在 BotFather 中配置 Bot 的基础设置：
+
+```
+# 设置 Bot 头像
+/setuserpic -> 选择 my_openclaw_bot -> 上传头像图片
+
+# 设置 Bot 描述（用户未开始对话时看到的介绍）
+/setdescription -> 选择 my_openclaw_bot -> 输入描述
+例如：我是由 OpenClaw 驱动的 AI 助手，可以帮你完成各种任务。
+
+# 设置 About 信息
+/setabouttext -> 选择 my_openclaw_bot -> 输入简介
+例如：OpenClaw AI Agent - 智能助手
+
+# 设置 Bot 命令列表
+/setcommands -> 选择 my_openclaw_bot -> 输入命令列表
+start - 开始对话
+help - 获取帮助
+status - 查看系统状态
+ask - 向 AI 提问
+task - 创建新任务
+history - 查看历史记录
+```
+
+## 二、获取 Bot Token 和 Chat ID
+
+### Bot Token
+
+Bot Token 在创建时由 BotFather 提供。如果忘记了，可以通过以下方式找回：
+
+```
+# 在 BotFather 中发送
+/token -> 选择你的 Bot -> 获取 Token
+
+# 如果需要重置 Token（旧 Token 将立即失效）
+/revoke -> 选择你的 Bot -> 确认重置
+```
+
+### 获取个人 Chat ID
+
+Chat ID 用于指定消息的接收目标。获取个人 Chat ID 的方法：
+
+```bash
+# 方法一：通过 @userinfobot
+# 在 Telegram 中搜索 @userinfobot，发送任意消息即可获得你的 Chat ID
+
+# 方法二：通过 Bot API
+# 先给你的 Bot 发送一条消息，然后调用 getUpdates API
+curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates" | python3 -m json.tool
+
+# 在返回的 JSON 中找到 chat.id 字段
+# "chat": {
+#   "id": 123456789,        <-- 这就是你的 Chat ID
+#   "first_name": "Your Name",
+#   "type": "private"
+# }
+```
+
+### 获取群组 Chat ID
+
+```bash
+# 将 Bot 添加到群组后，在群组中发送一条消息
+# 然后调用 getUpdates API，找到 type 为 "group" 的 chat
+curl -s "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates" | python3 -m json.tool
+
+# 群组的 Chat ID 通常是负数
+# "chat": {
+#   "id": -1001234567890,   <-- 群组 Chat ID
+#   "title": "My Group",
+#   "type": "supergroup"
+# }
+```
+
+## 三、在 OpenClaw 中配置 Telegram Skill
+
+### 环境变量配置
+
+在 OpenClaw 的配置文件中添加 Telegram 相关的环境变量：
+
+```yaml
+# docker-compose.yml 中的环境变量
+environment:
+  - TELEGRAM_BOT_TOKEN=7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  - TELEGRAM_CHAT_ID=123456789
+  - TELEGRAM_WEBHOOK_URL=https://openclaw.yourdomain.com/api/telegram/webhook
+```
+
+或者在 `.env` 文件中配置：
+
+```env
+# Telegram Bot 配置
+TELEGRAM_BOT_TOKEN=7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TELEGRAM_CHAT_ID=123456789
+TELEGRAM_WEBHOOK_URL=https://openclaw.yourdomain.com/api/telegram/webhook
+```
+
+### 在 OpenClaw 管理后台配置
+
+1. 登录 OpenClaw 管理后台
+2. 进入「Skills」->「消息平台」
+3. 点击「Telegram」卡片
+4. 填写配置信息：
+   - Bot Token：填入 BotFather 提供的 Token
+   - Default Chat ID：填入默认接收消息的 Chat ID
+   - Webhook URL：填入你的 OpenClaw 对外可访问的 Webhook 地址
+5. 点击「测试连接」验证配置
+6. 保存配置
+
+### 配置 Webhook
+
+OpenClaw 默认使用 Webhook 模式接收 Telegram 消息（相比轮询模式更高效）：
+
+```bash
+# 手动设置 Webhook（OpenClaw 通常会自动完成）
+curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://openclaw.yourdomain.com/api/telegram/webhook",
+    "allowed_updates": ["message", "callback_query", "inline_query"],
+    "drop_pending_updates": true
+  }'
+
+# 验证 Webhook 设置
+curl -s "https://api.telegram.org/bot<TOKEN>/getWebhookInfo" | python3 -m json.tool
+```
+
+## 四、消息发送功能
+
+### 发送文本消息
+
+```bash
+# 通过 OpenClaw API 发送 Telegram 消息
+curl -X POST "https://openclaw.yourdomain.com/api/skills/telegram/send" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": 123456789,
+    "text": "这是来自 OpenClaw 的测试消息",
+    "parse_mode": "Markdown"
+  }'
+```
+
+### 发送 Markdown 格式消息
+
+Telegram 支持 Markdown 和 HTML 两种格式化方式：
+
+```bash
+# Markdown 格式
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": 123456789,
+    "text": "*粗体文本*\n_斜体文本_\n`行内代码`\n```python\nprint(\"Hello OpenClaw\")\n```\n[链接文本](https://example.com)",
+    "parse_mode": "MarkdownV2"
+  }'
+```
+
+### 发送图片
+
+```bash
+# 通过 URL 发送图片
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendPhoto" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": 123456789,
+    "photo": "https://example.com/image.png",
+    "caption": "这是一张图片说明"
+  }'
+
+# 上传本地文件
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendPhoto" \
+  -F "chat_id=123456789" \
+  -F "photo=@/path/to/local/image.png" \
+  -F "caption=本地上传的图片"
+```
+
+### 发送文件
+
+```bash
+# 发送文档文件
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendDocument" \
+  -F "chat_id=123456789" \
+  -F "document=@/path/to/report.pdf" \
+  -F "caption=这是今日报告"
+```
+
+## 五、接收消息并自动回复
+
+### Webhook 消息处理流程
+
+当用户给 Bot 发送消息时，Telegram 会将消息推送到你配置的 Webhook URL。OpenClaw 接收到消息后，会按照配置的 Agent 流程进行处理。
+
+典型的消息处理流程：
+
+```
+用户发送消息 -> Telegram 服务器 -> Webhook -> OpenClaw -> AI Agent 处理 -> 返回结果 -> 发送回复
+```
+
+### 在 OpenClaw 中配置自动回复规则
+
+通过 OpenClaw 的 Flow 编辑器配置消息处理逻辑：
+
+```yaml
+# OpenClaw Flow 配置示例
+name: telegram-auto-reply
+trigger:
+  type: telegram_message
+  filter:
+    message_type: text  # 仅处理文本消息
+
+steps:
+  - name: ai-process
+    skill: openai-chat
+    params:
+      model: gpt-4
+      system_prompt: |
+        你是一个友好的 AI 助手，通过 Telegram 为用户提供帮助。
+        请用简洁的中文回复用户的问题。
+      user_message: "{{trigger.message.text}}"
+
+  - name: send-reply
+    skill: telegram-send
+    params:
+      chat_id: "{{trigger.message.chat.id}}"
+      text: "{{steps.ai-process.output}}"
+      parse_mode: Markdown
+```
+
+### 命令处理
+
+Bot 命令以 `/` 开头，可以在 OpenClaw 中为不同命令配置不同的处理逻辑：
+
+```yaml
+# /ask 命令处理
+name: telegram-ask-command
+trigger:
+  type: telegram_command
+  command: /ask
+
+steps:
+  - name: extract-question
+    skill: text-extract
+    params:
+      text: "{{trigger.message.text}}"
+      pattern: "/ask\\s+(.*)"
+
+  - name: ai-answer
+    skill: openai-chat
+    params:
+      model: gpt-4
+      user_message: "{{steps.extract-question.output}}"
+
+  - name: reply
+    skill: telegram-send
+    params:
+      chat_id: "{{trigger.message.chat.id}}"
+      text: "{{steps.ai-answer.output}}"
+```
+
+## 六、群组管理功能
+
+### 将 Bot 添加到群组
+
+1. 在群组设置中点击「添加成员」
+2. 搜索你的 Bot 用户名
+3. 添加到群组
+
+### 配置群组权限
+
+在 BotFather 中设置 Bot 的群组隐私模式：
+
+```
+# 默认情况下，Bot 只能接收以 / 开头的命令消息
+# 如果需要接收所有群组消息，需要关闭隐私模式：
+/setprivacy -> 选择 Bot -> Disable
+```
+
+### 群组管理功能示例
+
+```yaml
+# 新成员欢迎消息
+name: welcome-new-member
+trigger:
+  type: telegram_event
+  event: new_chat_members
+
+steps:
+  - name: welcome
+    skill: telegram-send
+    params:
+      chat_id: "{{trigger.message.chat.id}}"
+      text: |
+        欢迎 {{trigger.message.new_chat_members[0].first_name}} 加入群组！
+
+        请先阅读群组规则，有任何问题可以直接 @bot 提问。
+```
+
+## 七、Inline Keyboard 交互
+
+Inline Keyboard 允许在消息下方添加交互按钮，提供更丰富的用户体验。
+
+### 发送带按钮的消息
+
+```bash
+curl -X POST "https://api.telegram.org/bot<TOKEN>/sendMessage" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": 123456789,
+    "text": "请选择你需要的操作：",
+    "reply_markup": {
+      "inline_keyboard": [
+        [
+          {"text": "查看任务列表", "callback_data": "action_tasks"},
+          {"text": "创建新任务", "callback_data": "action_new_task"}
+        ],
+        [
+          {"text": "系统状态", "callback_data": "action_status"},
+          {"text": "帮助", "callback_data": "action_help"}
+        ],
+        [
+          {"text": "访问 OpenClaw", "url": "https://openclaw.yourdomain.com"}
+        ]
+      ]
+    }
+  }'
+```
+
+### 处理按钮回调
+
+```yaml
+# 在 OpenClaw 中配置 callback_query 处理
+name: handle-inline-keyboard
+trigger:
+  type: telegram_callback
+
+steps:
+  - name: route-action
+    skill: condition-router
+    params:
+      value: "{{trigger.callback_query.data}}"
+      routes:
+        action_tasks: fetch-tasks
+        action_new_task: create-task-form
+        action_status: check-status
+        action_help: show-help
+
+  - name: fetch-tasks
+    skill: openclaw-api
+    params:
+      endpoint: /api/tasks
+      method: GET
+    condition: "{{steps.route-action.output == 'fetch-tasks'}}"
+
+  - name: reply
+    skill: telegram-answer-callback
+    params:
+      callback_query_id: "{{trigger.callback_query.id}}"
+      text: "正在处理..."
+```
+
+### 动态更新消息
+
+```bash
+# 编辑已发送的消息（更新按钮状态）
+curl -X POST "https://api.telegram.org/bot<TOKEN>/editMessageText" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "chat_id": 123456789,
+    "message_id": 456,
+    "text": "任务已创建成功！\n\n任务ID: #1234\n状态: 进行中",
+    "reply_markup": {
+      "inline_keyboard": [
+        [
+          {"text": "查看详情", "callback_data": "view_1234"},
+          {"text": "完成任务", "callback_data": "done_1234"}
+        ]
+      ]
+    }
+  }'
+```
+
+## 八、定时推送配置
+
+### 在 OpenClaw 中配置定时任务
+
+利用 OpenClaw 的 Scheduler 功能，配置定时推送消息到 Telegram：
+
+```yaml
+# 每日早报推送
+name: daily-morning-report
+trigger:
+  type: schedule
+  cron: "0 9 * * *"  # 每天早上 9 点
+
+steps:
+  - name: gather-info
+    skill: openai-chat
+    params:
+      model: gpt-4
+      system_prompt: "你是一个新闻助手，请生成今日简报。"
+      user_message: "请生成今天的技术新闻和 AI 领域简报。"
+
+  - name: send-report
+    skill: telegram-send
+    params:
+      chat_id: 123456789
+      text: |
+        *每日早报 - {{date.format('YYYY-MM-DD')}}*
+
+        {{steps.gather-info.output}}
+      parse_mode: MarkdownV2
+```
+
+```yaml
+# 系统监控告警
+name: system-health-check
+trigger:
+  type: schedule
+  cron: "*/30 * * * *"  # 每 30 分钟检查一次
+
+steps:
+  - name: check-health
+    skill: http-request
+    params:
+      url: "http://localhost:3000/health"
+      method: GET
+
+  - name: alert-if-down
+    skill: telegram-send
+    params:
+      chat_id: 123456789
+      text: "OpenClaw 服务异常！请立即检查。\n\n错误信息: {{steps.check-health.error}}"
+    condition: "{{steps.check-health.status != 200}}"
+```
+
+## 九、安全注意事项
+
+### Token 安全
+
+```bash
+# 不要在代码中硬编码 Token
+# 错误示例：
+BOT_TOKEN = "7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# 正确做法：使用环境变量
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+```
+
+### Webhook 安全
+
+```bash
+# 设置 Webhook 时使用 secret_token 验证请求来源
+curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://openclaw.yourdomain.com/api/telegram/webhook",
+    "secret_token": "your-random-secret-string-here"
+  }'
+```
+
+OpenClaw 会自动验证每个 Webhook 请求的 `X-Telegram-Bot-Api-Secret-Token` 头部，确保请求确实来自 Telegram 服务器。
+
+### 其他安全建议
+
+1. **限制 Bot 的群组权限**：不要给 Bot 不必要的管理员权限
+2. **定期轮换 Token**：如果怀疑 Token 泄露，立即通过 BotFather 的 `/revoke` 命令重置
+3. **使用 HTTPS**：Webhook URL 必须使用 HTTPS，确保传输加密
+4. **IP 白名单**：在服务器防火墙中限制 Webhook 入站请求，只允许 Telegram 的 IP 段
+5. **速率限制**：配置请求速率限制，防止恶意用户通过 Bot 大量调用 AI 服务
+
+```bash
+# Telegram 官方 IP 段（用于 Webhook 白名单）
+# 149.154.160.0/20
+# 91.108.4.0/22
+```
+
+## 总结
+
+通过本教程，你已经完成了 Telegram Bot 与 OpenClaw 的完整集成，包括：
+
+- 使用 BotFather 创建和配置 Bot
+- 获取 Bot Token 和 Chat ID
+- 在 OpenClaw 中配置 Telegram Skill 和 Webhook
+- 实现文本、图片、文件等多种消息发送
+- 配置自动回复和命令处理
+- 使用 Inline Keyboard 实现交互式操作
+- 设置定时推送任务
+- 遵循安全最佳实践
+
+Telegram Bot 是 OpenClaw 最灵活的消息通道之一。借助 OpenClaw 的 AI Agent 能力，你可以打造一个功能强大的 Telegram 智能助手，随时随地通过手机与 AI 互动。

@@ -1,0 +1,844 @@
+---
+title: "自定义 Skill 开发入门"
+description: "从零开始学习 OpenClaw Skill 开发，涵盖架构原理、开发环境搭建、项目结构、manifest 配置、编写第一个 Skill、工具函数与 API 调用、参数校验与错误处理、本地调试测试、发布到 ClawHub 以及版本管理等完整流程"
+category: "开发者篇"
+tags: ["Skill开发", "TypeScript", "API", "扩展"]
+date: "2026-02-05"
+---
+
+## 什么是 OpenClaw Skill？
+
+OpenClaw Skill 是 OpenClaw 生态系统中的可复用功能模块。每个 Skill 封装了特定的能力——从简单的文本处理到复杂的外部 API 集成，都可以通过 Skill 机制实现。Skill 系统的设计理念是**模块化、可组合、易分发**，让开发者能够像搭积木一样为 AI Agent 赋予新的能力。
+
+### Skill 架构原理
+
+OpenClaw Skill 采用沙箱化的插件架构，核心运行机制如下：
+
+```
+┌─────────────────────────────────────────────────┐
+│              OpenClaw Runtime                     │
+│                                                   │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
+│  │  Skill A  │  │  Skill B  │  │  Skill C  │    │
+│  │ (沙箱环境) │  │ (沙箱环境) │  │ (沙箱环境) │    │
+│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘    │
+│        │              │              │            │
+│  ┌─────┴──────────────┴──────────────┴─────┐     │
+│  │           Skill Runtime API              │     │
+│  │    (权限控制 / 资源限制 / 生命周期管理)     │     │
+│  └──────────────────────────────────────────┘     │
+│                                                   │
+│  ┌──────────────────────────────────────────┐     │
+│  │        Core Engine (LLM 调度层)           │     │
+│  └──────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────┘
+```
+
+每个 Skill 运行在独立的沙箱环境中，通过 Skill Runtime API 与 OpenClaw 核心引擎交互。这种设计确保了：
+
+- **安全隔离**：Skill 之间互不干扰，一个 Skill 崩溃不会影响整体系统
+- **权限控制**：每个 Skill 只能访问其声明的资源和能力
+- **资源限制**：CPU、内存、网络等资源可独立配置上限
+- **热加载**：支持运行时动态加载和卸载 Skill，无需重启服务
+
+### Skill 的生命周期
+
+一个 Skill 从加载到卸载，经历以下阶段：
+
+1. **注册（Register）**：读取 `manifest.json`，验证元数据和权限声明
+2. **初始化（Initialize）**：执行 `onInit` 钩子，建立必要的连接和状态
+3. **就绪（Ready）**：Skill 可被 Agent 调用
+4. **执行（Execute）**：接收参数，执行核心逻辑，返回结果
+5. **销毁（Destroy）**：执行 `onDestroy` 钩子，清理资源
+
+## 开发环境搭建
+
+### 系统要求
+
+- Node.js >= 18.0.0（推荐使用 LTS 版本）
+- TypeScript >= 5.0
+- pnpm >= 8.0（推荐）或 npm >= 9.0
+- OpenClaw CLI >= 2.0
+
+### 安装 OpenClaw CLI
+
+```bash
+# 使用 npm 全局安装
+npm install -g @openclaw/cli
+
+# 或使用 pnpm
+pnpm add -g @openclaw/cli
+
+# 验证安装
+openclaw --version
+# 输出: openclaw-cli v2.4.1
+
+# 登录 ClawHub（发布时需要）
+openclaw login
+```
+
+### 初始化 Skill 项目
+
+```bash
+# 使用脚手架创建新项目
+openclaw skill init my-first-skill
+
+# 交互式选项
+# ? Skill 名称: my-first-skill
+# ? 描述: 我的第一个 OpenClaw Skill
+# ? 作者: your-name
+# ? 使用模板: basic (基础模板)
+# ? 包管理器: pnpm
+
+cd my-first-skill
+pnpm install
+```
+
+## 项目结构详解
+
+脚手架生成的标准项目结构如下：
+
+```
+my-first-skill/
+├── src/
+│   ├── index.ts          # Skill 入口文件
+│   ├── handlers/         # 处理器目录
+│   │   └── hello.ts      # Hello World 处理器
+│   ├── utils/            # 工具函数
+│   │   ├── validator.ts  # 参数校验
+│   │   └── http.ts       # HTTP 请求封装
+│   └── types/            # 类型定义
+│       └── index.ts      # 类型声明
+├── tests/                # 测试文件
+│   ├── hello.test.ts
+│   └── setup.ts
+├── manifest.json         # Skill 清单文件
+├── tsconfig.json         # TypeScript 配置
+├── package.json
+├── .env.example          # 环境变量模板
+└── README.md
+```
+
+每个目录的职责：
+
+- `src/index.ts`：Skill 入口，负责注册处理器和生命周期钩子
+- `src/handlers/`：核心业务逻辑，每个文件对应一个可调用的函数
+- `src/utils/`：可复用的工具函数
+- `src/types/`：TypeScript 类型定义，确保类型安全
+- `tests/`：单元测试和集成测试
+- `manifest.json`：Skill 的元数据、权限声明和配置
+
+## manifest.json 配置详解
+
+`manifest.json` 是 Skill 的核心配置文件，OpenClaw Runtime 通过它了解 Skill 的能力和需求：
+
+```json
+{
+  "name": "my-first-skill",
+  "version": "1.0.0",
+  "description": "我的第一个 OpenClaw Skill，提供问候和文本处理功能",
+  "author": "your-name",
+  "license": "MIT",
+  "engine": ">=2.0.0",
+  "main": "dist/index.js",
+  "icon": "https://example.com/icon.png",
+
+  "permissions": {
+    "network": {
+      "enabled": true,
+      "allowedDomains": ["api.example.com", "httpbin.org"]
+    },
+    "filesystem": {
+      "enabled": false
+    },
+    "environment": {
+      "enabled": true,
+      "variables": ["MY_API_KEY"]
+    }
+  },
+
+  "functions": [
+    {
+      "name": "hello",
+      "description": "向指定用户发送问候语，支持多种语言",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "用户名称",
+            "maxLength": 50
+          },
+          "language": {
+            "type": "string",
+            "description": "语言代码",
+            "enum": ["zh", "en", "ja", "ko"],
+            "default": "zh"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "textProcess",
+      "description": "对文本进行各种处理操作",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "待处理的文本内容",
+            "maxLength": 10000
+          },
+          "operation": {
+            "type": "string",
+            "description": "处理操作类型",
+            "enum": ["summarize", "translate", "format", "extract"]
+          }
+        },
+        "required": ["text", "operation"]
+      }
+    }
+  ],
+
+  "config": {
+    "timeout": 30000,
+    "retries": 3,
+    "rateLimit": {
+      "maxRequests": 100,
+      "windowMs": 60000
+    }
+  }
+}
+```
+
+### 关键配置项说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | Skill 唯一标识，需全局唯一 |
+| `version` | string | 遵循 semver 规范的版本号 |
+| `engine` | string | 兼容的 OpenClaw Runtime 版本范围 |
+| `permissions` | object | 权限声明，遵循最小权限原则 |
+| `functions` | array | 对外暴露的可调用函数列表 |
+| `config` | object | 运行时配置，如超时、重试策略等 |
+
+## 编写第一个 Skill：Hello World
+
+### 入口文件 `src/index.ts`
+
+```typescript
+import { SkillRuntime, SkillContext, SkillResult } from '@openclaw/skill-sdk';
+import { helloHandler } from './handlers/hello';
+import { textProcessHandler } from './handlers/textProcess';
+
+// 创建 Skill 实例
+const skill = new SkillRuntime({
+  name: 'my-first-skill',
+});
+
+// 注册生命周期钩子
+skill.onInit(async (ctx: SkillContext) => {
+  console.log(`[${ctx.skillName}] 初始化完成`);
+  // 可以在这里建立数据库连接、预热缓存等
+});
+
+skill.onDestroy(async (ctx: SkillContext) => {
+  console.log(`[${ctx.skillName}] 正在清理资源...`);
+  // 关闭连接、释放资源
+});
+
+// 注册函数处理器
+skill.registerFunction('hello', helloHandler);
+skill.registerFunction('textProcess', textProcessHandler);
+
+// 导出 Skill 实例
+export default skill;
+```
+
+### 处理器 `src/handlers/hello.ts`
+
+```typescript
+import {
+  FunctionHandler,
+  FunctionContext,
+  FunctionResult,
+} from '@openclaw/skill-sdk';
+
+// 多语言问候语映射
+const greetings: Record<string, (name: string) => string> = {
+  zh: (name) => `你好，${name}！欢迎使用 OpenClaw。今天有什么可以帮到你的吗？`,
+  en: (name) => `Hello, ${name}! Welcome to OpenClaw. How can I help you today?`,
+  ja: (name) => `こんにちは、${name}さん！OpenClawへようこそ。`,
+  ko: (name) => `안녕하세요, ${name}님! OpenClaw에 오신 것을 환영합니다.`,
+};
+
+// 定义处理器函数
+export const helloHandler: FunctionHandler = async (
+  ctx: FunctionContext
+): Promise<FunctionResult> => {
+  const { name, language = 'zh' } = ctx.parameters;
+
+  // 参数校验
+  if (!name || typeof name !== 'string') {
+    return {
+      success: false,
+      error: {
+        code: 'INVALID_PARAMETER',
+        message: '参数 name 不能为空且必须是字符串',
+      },
+    };
+  }
+
+  if (name.length > 50) {
+    return {
+      success: false,
+      error: {
+        code: 'PARAMETER_TOO_LONG',
+        message: '参数 name 长度不能超过 50 个字符',
+      },
+    };
+  }
+
+  // 获取对应语言的问候函数
+  const greetFn = greetings[language];
+  if (!greetFn) {
+    return {
+      success: false,
+      error: {
+        code: 'UNSUPPORTED_LANGUAGE',
+        message: `不支持的语言: ${language}，可选项: ${Object.keys(greetings).join(', ')}`,
+      },
+    };
+  }
+
+  // 生成问候语
+  const greeting = greetFn(name);
+
+  // 记录调用日志
+  ctx.logger.info(`生成问候语: language=${language}, name=${name}`);
+
+  return {
+    success: true,
+    data: {
+      greeting,
+      language,
+      timestamp: new Date().toISOString(),
+    },
+  };
+};
+```
+
+### 文本处理器 `src/handlers/textProcess.ts`
+
+```typescript
+import {
+  FunctionHandler,
+  FunctionContext,
+  FunctionResult,
+} from '@openclaw/skill-sdk';
+
+export const textProcessHandler: FunctionHandler = async (
+  ctx: FunctionContext
+): Promise<FunctionResult> => {
+  const { text, operation } = ctx.parameters;
+
+  if (!text || text.length === 0) {
+    return {
+      success: false,
+      error: { code: 'EMPTY_TEXT', message: '文本内容不能为空' },
+    };
+  }
+
+  let result: string;
+
+  switch (operation) {
+    case 'summarize':
+      // 调用 OpenClaw 内置的 LLM 能力进行摘要
+      const summary = await ctx.llm.complete({
+        prompt: `请用不超过 100 字总结以下内容：\n\n${text}`,
+        maxTokens: 200,
+      });
+      result = summary.text;
+      break;
+
+    case 'translate':
+      const translated = await ctx.llm.complete({
+        prompt: `请将以下内容翻译为英文：\n\n${text}`,
+        maxTokens: text.length * 2,
+      });
+      result = translated.text;
+      break;
+
+    case 'format':
+      // 本地文本格式化处理
+      result = text
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/。/g, '。\n')
+        .replace(/；/g, '；\n');
+      break;
+
+    case 'extract':
+      const extracted = await ctx.llm.complete({
+        prompt: `请从以下文本中提取关键信息，以 JSON 格式返回：\n\n${text}`,
+        maxTokens: 500,
+        responseFormat: 'json',
+      });
+      result = extracted.text;
+      break;
+
+    default:
+      return {
+        success: false,
+        error: {
+          code: 'UNKNOWN_OPERATION',
+          message: `未知操作: ${operation}`,
+        },
+      };
+  }
+
+  return {
+    success: true,
+    data: {
+      original: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
+      operation,
+      result,
+      processedAt: new Date().toISOString(),
+    },
+  };
+};
+```
+
+## 工具函数与 API 调用
+
+### HTTP 请求封装 `src/utils/http.ts`
+
+在 Skill 中调用外部 API 是常见需求。以下是一个带重试和超时机制的 HTTP 封装：
+
+```typescript
+import { SkillContext } from '@openclaw/skill-sdk';
+
+interface RequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  headers?: Record<string, string>;
+  body?: unknown;
+  timeout?: number;
+  retries?: number;
+}
+
+interface ApiResponse<T = unknown> {
+  status: number;
+  data: T;
+  headers: Record<string, string>;
+}
+
+export async function apiRequest<T>(
+  ctx: SkillContext,
+  url: string,
+  options: RequestOptions = {}
+): Promise<ApiResponse<T>> {
+  const {
+    method = 'GET',
+    headers = {},
+    body,
+    timeout = 10000,
+    retries = 3,
+  } = options;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      const response = await ctx.fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'OpenClaw-Skill/1.0',
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as T;
+
+      return {
+        status: response.status,
+        data,
+        headers: Object.fromEntries(response.headers.entries()),
+      };
+    } catch (error) {
+      lastError = error as Error;
+      ctx.logger.warn(
+        `API 请求失败 (尝试 ${attempt}/${retries}): ${lastError.message}`
+      );
+
+      if (attempt < retries) {
+        // 指数退避等待
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw new Error(`API 请求在 ${retries} 次重试后仍然失败: ${lastError?.message}`);
+}
+```
+
+## 参数校验与错误处理
+
+### 参数校验器 `src/utils/validator.ts`
+
+健壮的参数校验是 Skill 可靠性的基础：
+
+```typescript
+type ValidationRule = {
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  required?: boolean;
+  minLength?: number;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  pattern?: RegExp;
+  enum?: unknown[];
+  custom?: (value: unknown) => string | null;
+};
+
+type ValidationSchema = Record<string, ValidationRule>;
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+export function validate(
+  params: Record<string, unknown>,
+  schema: ValidationSchema
+): ValidationResult {
+  const errors: string[] = [];
+
+  for (const [field, rule] of Object.entries(schema)) {
+    const value = params[field];
+
+    // 必填校验
+    if (rule.required && (value === undefined || value === null || value === '')) {
+      errors.push(`参数 ${field} 为必填项`);
+      continue;
+    }
+
+    if (value === undefined || value === null) continue;
+
+    // 类型校验
+    if (rule.type === 'array') {
+      if (!Array.isArray(value)) {
+        errors.push(`参数 ${field} 应为数组类型`);
+        continue;
+      }
+    } else if (typeof value !== rule.type) {
+      errors.push(`参数 ${field} 应为 ${rule.type} 类型，实际为 ${typeof value}`);
+      continue;
+    }
+
+    // 字符串长度校验
+    if (rule.type === 'string' && typeof value === 'string') {
+      if (rule.minLength && value.length < rule.minLength) {
+        errors.push(`参数 ${field} 长度不能小于 ${rule.minLength}`);
+      }
+      if (rule.maxLength && value.length > rule.maxLength) {
+        errors.push(`参数 ${field} 长度不能超过 ${rule.maxLength}`);
+      }
+      if (rule.pattern && !rule.pattern.test(value)) {
+        errors.push(`参数 ${field} 格式不正确`);
+      }
+    }
+
+    // 数值范围校验
+    if (rule.type === 'number' && typeof value === 'number') {
+      if (rule.min !== undefined && value < rule.min) {
+        errors.push(`参数 ${field} 不能小于 ${rule.min}`);
+      }
+      if (rule.max !== undefined && value > rule.max) {
+        errors.push(`参数 ${field} 不能大于 ${rule.max}`);
+      }
+    }
+
+    // 枚举校验
+    if (rule.enum && !rule.enum.includes(value)) {
+      errors.push(`参数 ${field} 的值必须是以下之一: ${rule.enum.join(', ')}`);
+    }
+
+    // 自定义校验
+    if (rule.custom) {
+      const customError = rule.custom(value);
+      if (customError) errors.push(customError);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+```
+
+在处理器中使用校验器：
+
+```typescript
+import { validate } from '../utils/validator';
+
+export const myHandler: FunctionHandler = async (ctx) => {
+  const { valid, errors } = validate(ctx.parameters, {
+    name: { type: 'string', required: true, minLength: 1, maxLength: 50 },
+    age: { type: 'number', required: false, min: 0, max: 150 },
+    email: {
+      type: 'string',
+      required: true,
+      pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+    },
+  });
+
+  if (!valid) {
+    return {
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: errors.join('; ') },
+    };
+  }
+
+  // 业务逻辑...
+};
+```
+
+## 本地调试与测试
+
+### 使用 OpenClaw CLI 调试
+
+```bash
+# 启动本地开发服务器（带热重载）
+openclaw skill dev
+
+# 输出:
+# 🔧 Skill 开发服务器已启动
+# 📍 地址: http://localhost:3100
+# 📡 WebSocket: ws://localhost:3100/ws
+# 🔄 文件监听已开启，修改代码自动重载
+
+# 在另一个终端中手动调用函数测试
+openclaw skill invoke hello --params '{"name": "张三", "language": "zh"}'
+
+# 输出:
+# ✓ 调用成功 (耗时: 12ms)
+# {
+#   "success": true,
+#   "data": {
+#     "greeting": "你好，张三！欢迎使用 OpenClaw。今天有什么可以帮到你的吗？",
+#     "language": "zh",
+#     "timestamp": "2026-02-05T10:30:00.000Z"
+#   }
+# }
+```
+
+### 编写单元测试
+
+使用 Vitest 编写测试 `tests/hello.test.ts`：
+
+```typescript
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { helloHandler } from '../src/handlers/hello';
+import { createMockContext } from './setup';
+
+describe('helloHandler', () => {
+  let mockCtx: ReturnType<typeof createMockContext>;
+
+  beforeEach(() => {
+    mockCtx = createMockContext();
+  });
+
+  it('应返回中文问候语', async () => {
+    mockCtx.parameters = { name: '张三', language: 'zh' };
+    const result = await helloHandler(mockCtx);
+
+    expect(result.success).toBe(true);
+    expect(result.data.greeting).toContain('张三');
+    expect(result.data.language).toBe('zh');
+  });
+
+  it('默认使用中文', async () => {
+    mockCtx.parameters = { name: 'Alice' };
+    const result = await helloHandler(mockCtx);
+
+    expect(result.success).toBe(true);
+    expect(result.data.language).toBe('zh');
+  });
+
+  it('空名称时应返回错误', async () => {
+    mockCtx.parameters = { name: '' };
+    const result = await helloHandler(mockCtx);
+
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe('INVALID_PARAMETER');
+  });
+
+  it('不支持的语言应返回错误', async () => {
+    mockCtx.parameters = { name: '张三', language: 'fr' };
+    const result = await helloHandler(mockCtx);
+
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe('UNSUPPORTED_LANGUAGE');
+  });
+
+  it('名称超长时应返回错误', async () => {
+    mockCtx.parameters = { name: 'a'.repeat(51), language: 'zh' };
+    const result = await helloHandler(mockCtx);
+
+    expect(result.success).toBe(false);
+    expect(result.error.code).toBe('PARAMETER_TOO_LONG');
+  });
+});
+```
+
+测试辅助文件 `tests/setup.ts`：
+
+```typescript
+import { vi } from 'vitest';
+
+export function createMockContext() {
+  return {
+    parameters: {} as Record<string, unknown>,
+    skillName: 'test-skill',
+    logger: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    },
+    fetch: vi.fn(),
+    llm: {
+      complete: vi.fn().mockResolvedValue({ text: 'mock response' }),
+    },
+    env: {
+      get: vi.fn((key: string) => `mock-${key}`),
+    },
+  };
+}
+```
+
+运行测试：
+
+```bash
+# 运行所有测试
+pnpm test
+
+# 带覆盖率报告
+pnpm test -- --coverage
+
+# 监听模式（开发时推荐）
+pnpm test -- --watch
+```
+
+## 发布到 ClawHub
+
+ClawHub 是 OpenClaw 的官方 Skill 市场，开发者可以在这里发布和分享 Skill。
+
+### 发布前检查
+
+```bash
+# 运行完整的发布前检查
+openclaw skill check
+
+# 输出:
+# ✓ manifest.json 格式正确
+# ✓ 所有声明的函数都有对应实现
+# ✓ TypeScript 编译通过
+# ✓ 单元测试全部通过 (5/5)
+# ✓ 权限声明合理
+# ✓ 包大小: 24KB (限制: 5MB)
+#
+# ✅ 所有检查通过，可以发布！
+```
+
+### 构建与发布
+
+```bash
+# 构建 Skill 包
+openclaw skill build
+
+# 发布到 ClawHub
+openclaw skill publish
+
+# 输出:
+# 📦 正在打包 my-first-skill@1.0.0...
+# 📤 正在上传到 ClawHub...
+# ✅ 发布成功！
+# 🔗 https://clawhub.openclaw.dev/skills/my-first-skill
+```
+
+### 发布可见性选项
+
+```bash
+# 发布为公开 Skill（默认）
+openclaw skill publish --access public
+
+# 发布为私有 Skill（仅自己可见）
+openclaw skill publish --access private
+
+# 发布为组织内部 Skill
+openclaw skill publish --access org --org my-org
+```
+
+## 版本管理
+
+OpenClaw Skill 遵循语义化版本（Semantic Versioning）规范：
+
+- **主版本号（Major）**：不兼容的 API 变更
+- **次版本号（Minor）**：向后兼容的功能新增
+- **修订号（Patch）**：向后兼容的问题修复
+
+```bash
+# 升级修订版本 1.0.0 → 1.0.1
+openclaw skill version patch
+
+# 升级次版本 1.0.1 → 1.1.0
+openclaw skill version minor
+
+# 升级主版本 1.1.0 → 2.0.0
+openclaw skill version major
+
+# 发布新版本
+openclaw skill publish
+```
+
+### 版本废弃与回退
+
+```bash
+# 废弃某个版本（不影响已安装的用户）
+openclaw skill deprecate 1.0.0 --message "存在安全漏洞，请升级到 1.0.1"
+
+# 查看版本历史
+openclaw skill versions
+
+# 输出:
+# my-first-skill
+# ├── 2.0.0 (latest)    2026-02-05
+# ├── 1.1.0             2026-01-20
+# ├── 1.0.1             2026-01-15
+# └── 1.0.0 (废弃)      2026-01-10
+```
+
+## 最佳实践总结
+
+1. **遵循单一职责原则**：每个 Skill 专注解决一类问题，不要贪多
+2. **严格声明权限**：只申请必要的权限，网络权限精确到域名
+3. **完善错误处理**：永远不要让异常"裸奔"，为每种错误场景提供清晰的错误码和消息
+4. **编写充分的测试**：覆盖正常流程和各种边界情况
+5. **提供详细文档**：在 manifest.json 中为每个函数和参数编写准确的描述
+6. **关注性能**：使用缓存减少重复请求，设置合理的超时时间
+7. **版本管理规范**：严格遵循 semver 规范，避免在 patch 版本中引入破坏性变更
+
+通过本教程，你已经掌握了 OpenClaw Skill 开发的完整流程。从环境搭建到代码实现，从测试调试到发布管理，你可以开始构建自己的 Skill 并分享给社区了。接下来可以继续学习 MCP Server 集成和多 Agent 协作架构等进阶主题，进一步拓展 OpenClaw 的能力边界。

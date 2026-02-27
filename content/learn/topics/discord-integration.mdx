@@ -1,0 +1,706 @@
+---
+title: "Discord 服务器集成指南"
+description: "从零创建 Discord Bot 并与 OpenClaw 集成，涵盖应用创建、权限与 Intents 配置、消息监听与回复、Slash Commands、Embed 富消息、频道自动化管理及完整 JS 代码示例"
+category: "消息平台篇"
+tags: ["Discord", "Bot", "社区管理", "自动化"]
+date: "2026-02-14"
+---
+
+## 前言
+
+Discord 已经从最初的游戏语音工具发展为全球最受欢迎的社区平台之一，广泛应用于开源项目、Web3 社区、学习小组和技术团队中。其强大的 Bot 生态使得自动化运营成为可能，而将 OpenClaw AI Agent 接入 Discord 可以极大提升社区管理效率——从智能问答到自动化频道管理，从内容审核到定时推送。
+
+本教程将完整讲解如何创建 Discord Bot、配置权限、开发交互功能，并与 OpenClaw 深度集成。
+
+## 一、创建 Discord 应用与 Bot
+
+### 1.1 创建应用
+
+1. 访问 [Discord Developer Portal](https://discord.com/developers/applications)
+2. 点击右上角「New Application」
+3. 输入应用名称（如 `OpenClaw AI`），点击创建
+4. 在应用设置页面，记录 **Application ID** 和 **Public Key**
+
+### 1.2 创建 Bot 用户
+
+1. 在左侧菜单中选择「Bot」
+2. 点击「Add Bot」并确认
+3. 设置 Bot 的用户名和头像
+4. 点击「Reset Token」获取 **Bot Token**
+
+**重要：Bot Token 是 Bot 的凭证，务必安全保管，不要泄露到公开仓库。**
+
+```bash
+# 将 Token 保存到环境变量
+export DISCORD_BOT_TOKEN="your-bot-token-here"
+```
+
+### 1.3 邀请 Bot 到服务器
+
+构建 OAuth2 邀请链接：
+
+```
+https://discord.com/api/oauth2/authorize?client_id=YOUR_APP_ID&permissions=8&scope=bot%20applications.commands
+```
+
+参数说明：
+- `client_id`：替换为你的 Application ID
+- `permissions=8`：管理员权限（生产环境建议使用最小权限原则）
+- `scope`：`bot` 和 `applications.commands` 用于支持 Slash Commands
+
+在浏览器中打开该链接，选择目标服务器，授权即可。
+
+## 二、权限与 Intents 配置
+
+### 2.1 Gateway Intents
+
+Discord 使用 Intents 机制控制 Bot 可以接收的事件类型。需要在 Developer Portal 中启用特权 Intents：
+
+1. 进入 Bot 设置页面
+2. 在「Privileged Gateway Intents」区域启用：
+   - **PRESENCE INTENT**：获取用户在线状态（用于显示活跃成员）
+   - **SERVER MEMBERS INTENT**：获取成员加入/离开事件（用于欢迎消息）
+   - **MESSAGE CONTENT INTENT**：读取消息内容（AI 对话必须开启）
+
+### 2.2 权限配置
+
+根据 Bot 功能需求，配置适当的权限位：
+
+```javascript
+// 推荐的 Bot 权限配置
+const { PermissionFlagsBits } = require('discord.js');
+
+const BOT_PERMISSIONS = [
+  PermissionFlagsBits.ViewChannel,           // 查看频道
+  PermissionFlagsBits.SendMessages,          // 发送消息
+  PermissionFlagsBits.SendMessagesInThreads, // 在帖子中发送消息
+  PermissionFlagsBits.EmbedLinks,            // 嵌入链接
+  PermissionFlagsBits.AttachFiles,           // 附加文件
+  PermissionFlagsBits.ReadMessageHistory,    // 读取历史消息
+  PermissionFlagsBits.AddReactions,          // 添加反应
+  PermissionFlagsBits.UseExternalEmojis,     // 使用外部表情
+  PermissionFlagsBits.ManageMessages,        // 管理消息（删除、置顶）
+  PermissionFlagsBits.ManageChannels,        // 管理频道
+  PermissionFlagsBits.ManageRoles,           // 管理角色
+  PermissionFlagsBits.CreatePublicThreads,   // 创建公开帖子
+];
+```
+
+### 2.3 OpenClaw Discord Skill 完整配置
+
+```yaml
+# config/skills/discord.yaml
+# Discord Bot 完整配置
+
+skills:
+  discord:
+    enabled: true
+    config:
+      # === 基础凭证 ===
+      bot_token: "${DISCORD_BOT_TOKEN}"
+      application_id: "${DISCORD_APP_ID}"
+      public_key: "${DISCORD_PUBLIC_KEY}"
+
+      # === Gateway Intents ===
+      intents:
+        - Guilds
+        - GuildMessages
+        - GuildMembers
+        - GuildPresences
+        - MessageContent
+        - DirectMessages
+        - GuildMessageReactions
+
+      # === Bot 行为 ===
+      behavior:
+        # Bot 前缀命令（除 Slash Commands 外的备选触发方式）
+        prefix: "!"
+        # 是否响应 DM（私信）
+        respond_to_dm: true
+        # 是否忽略 Bot 消息（防止 Bot 互相触发死循环）
+        ignore_bots: true
+        # AI 回复最大长度（Discord 单条消息限制 2000 字符）
+        max_reply_length: 1900
+        # 长消息自动分段发送
+        split_long_messages: true
+        # 回复时是否引用原消息
+        reply_with_reference: true
+
+      # === 频道配置 ===
+      channels:
+        # AI 对话频道（仅在这些频道中响应 AI 对话）
+        ai_channels:
+          - "1234567890123456789"   # #ai-chat 频道 ID
+          - "1234567890123456790"   # #ask-ai 频道 ID
+        # 日志频道（Bot 操作日志输出）
+        log_channel: "1234567890123456791"
+        # 欢迎频道
+        welcome_channel: "1234567890123456792"
+
+      # === 自动化规则 ===
+      automation:
+        # 新成员欢迎
+        welcome:
+          enabled: true
+          message: |
+            欢迎 {{user}} 加入服务器！
+            请先阅读 <#rules-channel-id> 中的规则，
+            然后到 <#introductions-channel-id> 做个自我介绍吧！
+          # 自动分配角色
+          auto_roles:
+            - "1234567890123456793"  # @新成员 角色 ID
+
+        # 关键词自动回复
+        auto_reply:
+          enabled: true
+          rules:
+            - keywords: ["怎么安装", "如何安装", "安装教程"]
+              reply: "请查看安装指南：https://docs.openclaw.dev/install"
+              channel_restrict: []   # 空数组表示所有频道生效
+            - keywords: ["价格", "收费", "多少钱"]
+              reply: "OpenClaw 基础版免费，Pro 版详见：https://openclaw.dev/pricing"
+
+        # 内容审核
+        moderation:
+          enabled: true
+          # 敏感词过滤
+          word_filter:
+            enabled: true
+            action: "delete_and_warn"  # delete / warn / delete_and_warn
+          # 防刷屏
+          anti_spam:
+            enabled: true
+            max_messages: 5        # 时间窗口内最大连续消息数
+            time_window: 10        # 时间窗口（秒）
+            action: "mute"         # mute / kick / warn
+            mute_duration: 300     # 禁言时长（秒）
+```
+
+## 三、消息监听与回复
+
+### 3.1 基础 Bot 框架
+
+```javascript
+// bot.js - Discord Bot 基础框架
+const { Client, GatewayIntentBits, Partials } = require('discord.js');
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+  ],
+  partials: [Partials.Channel, Partials.Message],
+});
+
+// Bot 就绪事件
+client.once('ready', () => {
+  console.log(`Bot 已上线: ${client.user.tag}`);
+  console.log(`已加入 ${client.guilds.cache.size} 个服务器`);
+
+  // 设置 Bot 状态
+  client.user.setActivity('OpenClaw AI | /help', { type: 'WATCHING' });
+});
+
+// 消息监听与 AI 回复
+client.on('messageCreate', async (message) => {
+  // 忽略 Bot 自身的消息
+  if (message.author.bot) return;
+
+  // 检查是否在 AI 频道中
+  const AI_CHANNELS = ['1234567890123456789', '1234567890123456790'];
+  if (!AI_CHANNELS.includes(message.channel.id) && message.guild) return;
+
+  try {
+    // 显示「正在输入」状态
+    await message.channel.sendTyping();
+
+    // 调用 OpenClaw API 获取 AI 回复
+    const response = await callOpenClawAPI(message.content, {
+      userId: message.author.id,
+      userName: message.author.username,
+      channelId: message.channel.id,
+      guildId: message.guild?.id,
+    });
+
+    // 处理长消息分段
+    if (response.length > 1900) {
+      const chunks = splitMessage(response, 1900);
+      for (const chunk of chunks) {
+        await message.reply(chunk);
+      }
+    } else {
+      await message.reply(response);
+    }
+  } catch (error) {
+    console.error('AI 回复错误:', error);
+    await message.reply('抱歉，处理消息时出现了错误，请稍后重试。');
+  }
+});
+
+// 消息分段函数
+function splitMessage(text, maxLength) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLength) {
+      chunks.push(remaining);
+      break;
+    }
+    // 尝试在换行处分割，保持内容完整性
+    let splitIndex = remaining.lastIndexOf('\n', maxLength);
+    if (splitIndex === -1 || splitIndex < maxLength * 0.5) {
+      splitIndex = maxLength;
+    }
+    chunks.push(remaining.substring(0, splitIndex));
+    remaining = remaining.substring(splitIndex).trimStart();
+  }
+  return chunks;
+}
+
+// 调用 OpenClaw API
+async function callOpenClawAPI(content, context) {
+  const response = await fetch('http://localhost:3000/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.OPENCLAW_API_KEY}`,
+    },
+    body: JSON.stringify({
+      message: content,
+      context: context,
+      skill: 'discord',
+    }),
+  });
+  const data = await response.json();
+  return data.reply;
+}
+
+client.login(process.env.DISCORD_BOT_TOKEN);
+```
+
+### 3.2 私信（DM）处理
+
+```javascript
+// 私信消息单独处理逻辑
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  // 检测是否为私信（DM）
+  if (!message.guild) {
+    console.log(`收到来自 ${message.author.tag} 的私信: ${message.content}`);
+
+    await message.channel.sendTyping();
+    const response = await callOpenClawAPI(message.content, {
+      userId: message.author.id,
+      userName: message.author.username,
+      isDM: true,
+    });
+    await message.reply(response);
+    return;
+  }
+});
+```
+
+### 3.3 消息反应（Reaction）监听
+
+```javascript
+// 监听消息反应，用于收藏、翻译等操作
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+
+  // 如果 reaction 是 partial，需要先 fetch 完整数据
+  if (reaction.partial) {
+    try { await reaction.fetch(); } catch { return; }
+  }
+
+  const emoji = reaction.emoji.name;
+  const originalMessage = reaction.message;
+
+  // 翻译功能：添加国旗 emoji 触发自动翻译
+  const langMap = {
+    '🇨🇳': '中文',
+    '🇺🇸': '英文',
+    '🇯🇵': '日文',
+    '🇰🇷': '韩文',
+  };
+
+  if (langMap[emoji]) {
+    const translated = await callOpenClawAPI(
+      `请将以下内容翻译成${langMap[emoji]}:\n${originalMessage.content}`,
+      { userId: user.id }
+    );
+    await originalMessage.reply(`**${langMap[emoji]}翻译：**\n${translated}`);
+  }
+
+  // 书签功能：添加书签 emoji 保存消息
+  if (emoji === '🔖') {
+    try {
+      await user.send(
+        `你收藏了一条消息：\n> ${originalMessage.content}\n\n` +
+        `来自 #${originalMessage.channel.name} - ${originalMessage.author.username}\n` +
+        `链接: ${originalMessage.url}`
+      );
+    } catch (err) {
+      console.log('无法发送私信给用户:', err);
+    }
+  }
+});
+```
+
+## 四、Slash Commands
+
+Slash Commands 是 Discord 推荐的 Bot 交互方式，用户在输入框中输入 `/` 即可看到可用命令列表，体验更加友好。
+
+### 4.1 注册 Slash Commands
+
+```javascript
+// commands/register.js - 注册所有 Slash Commands
+const { REST, Routes, SlashCommandBuilder } = require('discord.js');
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('ask')
+    .setDescription('向 AI 提问')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('你的问题')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('summarize')
+    .setDescription('总结频道最近的消息')
+    .addIntegerOption(option =>
+      option.setName('count')
+        .setDescription('要总结的消息数量（5-100）')
+        .setMinValue(5)
+        .setMaxValue(100)
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('translate')
+    .setDescription('翻译文本到指定语言')
+    .addStringOption(option =>
+      option.setName('text')
+        .setDescription('要翻译的文本')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName('target')
+        .setDescription('目标语言')
+        .setRequired(true)
+        .addChoices(
+          { name: '中文', value: 'zh' },
+          { name: 'English', value: 'en' },
+          { name: '日本語', value: 'ja' },
+          { name: '한국어', value: 'ko' },
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('reminder')
+    .setDescription('设置定时提醒')
+    .addStringOption(option =>
+      option.setName('message')
+        .setDescription('提醒内容')
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option.setName('minutes')
+        .setDescription('几分钟后提醒（1-1440）')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(1440)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('status')
+    .setDescription('查看 Bot 运行状态'),
+
+  new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('查看 Bot 帮助信息'),
+];
+
+const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_BOT_TOKEN);
+
+async function registerCommands() {
+  try {
+    console.log('正在注册 Slash Commands...');
+    await rest.put(
+      Routes.applicationCommands(process.env.DISCORD_APP_ID),
+      { body: commands.map(cmd => cmd.toJSON()) }
+    );
+    console.log(`成功注册 ${commands.length} 个 Slash Commands`);
+  } catch (error) {
+    console.error('注册失败:', error);
+  }
+}
+
+registerCommands();
+```
+
+### 4.2 处理 Slash Commands 交互
+
+```javascript
+// commands/handler.js - 处理 Slash Commands
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  const { commandName, options } = interaction;
+
+  switch (commandName) {
+    case 'ask': {
+      // 延迟回复（AI 处理可能需要较长时间）
+      await interaction.deferReply();
+
+      const question = options.getString('question');
+      const response = await callOpenClawAPI(question, {
+        userId: interaction.user.id,
+        channelId: interaction.channel.id,
+      });
+
+      await interaction.editReply(response);
+      break;
+    }
+
+    case 'summarize': {
+      await interaction.deferReply();
+      const count = options.getInteger('count') || 20;
+
+      // 获取频道历史消息
+      const messages = await interaction.channel.messages.fetch({ limit: count });
+      const messageTexts = messages
+        .filter(m => !m.author.bot)
+        .map(m => `${m.author.username}: ${m.content}`)
+        .reverse()
+        .join('\n');
+
+      const summary = await callOpenClawAPI(
+        `请用中文总结以下 Discord 频道对话的要点:\n${messageTexts}`,
+        { userId: interaction.user.id }
+      );
+
+      await interaction.editReply(`**最近 ${count} 条消息的总结：**\n\n${summary}`);
+      break;
+    }
+
+    case 'translate': {
+      await interaction.deferReply();
+      const text = options.getString('text');
+      const target = options.getString('target');
+      const langMap = { zh: '中文', en: '英文', ja: '日文', ko: '韩文' };
+
+      const translated = await callOpenClawAPI(
+        `请将以下文本翻译成${langMap[target]}，只输出翻译结果:\n${text}`,
+        { userId: interaction.user.id }
+      );
+
+      await interaction.editReply(`**翻译结果（${langMap[target]}）：**\n${translated}`);
+      break;
+    }
+
+    case 'reminder': {
+      const reminderMsg = options.getString('message');
+      const minutes = options.getInteger('minutes');
+
+      await interaction.reply(`好的，我会在 ${minutes} 分钟后提醒你：${reminderMsg}`);
+
+      setTimeout(async () => {
+        await interaction.followUp(`<@${interaction.user.id}> 提醒你：${reminderMsg}`);
+      }, minutes * 60 * 1000);
+      break;
+    }
+
+    case 'help': {
+      await interaction.reply({ embeds: [buildHelpEmbed()] });
+      break;
+    }
+  }
+});
+```
+
+## 五、Embed 富消息
+
+Discord Embed 可以创建结构化的卡片消息，信息展示更加美观清晰。
+
+### 5.1 构建各类 Embed 消息
+
+```javascript
+const { EmbedBuilder } = require('discord.js');
+
+// 帮助信息 Embed
+function buildHelpEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('OpenClaw AI Bot 使用帮助')
+    .setDescription('以下是所有可用的命令与功能：')
+    .setThumbnail('https://your-domain.com/bot-avatar.png')
+    .addFields(
+      { name: '/ask <问题>', value: '向 AI 提问任何问题', inline: true },
+      { name: '/summarize [数量]', value: '总结频道最近消息', inline: true },
+      { name: '/translate <文本> <语言>', value: '翻译文本到指定语言', inline: true },
+      { name: '/reminder <内容> <分钟>', value: '设置定时提醒', inline: true },
+      { name: '/status', value: '查看 Bot 运行状态', inline: true },
+      { name: '\u200B', value: '\u200B' },  // 空行分隔
+      { name: '直接对话', value: '在 #ai-chat 频道直接发消息即可与 AI 对话' },
+      { name: '消息反应', value: '对消息添加国旗 emoji 可触发自动翻译，添加书签 emoji 可收藏消息' },
+    )
+    .setFooter({ text: 'Powered by OpenClaw Pro' })
+    .setTimestamp();
+}
+
+// 系统状态 Embed
+function buildStatusEmbed(stats) {
+  return new EmbedBuilder()
+    .setColor(stats.healthy ? 0x57F287 : 0xED4245)
+    .setTitle('OpenClaw Bot 系统状态')
+    .addFields(
+      { name: '运行状态', value: stats.healthy ? '正常运行' : '异常', inline: true },
+      { name: '运行时间', value: stats.uptime, inline: true },
+      { name: '已处理消息', value: `${stats.messageCount} 条`, inline: true },
+      { name: 'API 延迟', value: `${stats.latency}ms`, inline: true },
+      { name: '内存使用', value: stats.memory, inline: true },
+      { name: '活跃用户', value: `${stats.activeUsers} 人`, inline: true },
+    )
+    .setTimestamp();
+}
+
+// 每日社区数据报告 Embed
+function buildDailyReportEmbed(data) {
+  return new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle(`社区日报 - ${data.date}`)
+    .setDescription('以下是今日社区活跃度数据：')
+    .addFields(
+      { name: '新增成员', value: `+${data.newMembers}`, inline: true },
+      { name: '消息总数', value: `${data.totalMessages}`, inline: true },
+      { name: '活跃用户', value: `${data.activeUsers}`, inline: true },
+      { name: '热门话题', value: data.hotTopics.map((t, i) => `${i + 1}. ${t}`).join('\n') },
+      { name: '活跃频道 Top 5', value: data.topChannels.map((c, i) => `${i + 1}. #${c.name} (${c.messages} 条)`).join('\n') },
+    )
+    .setFooter({ text: 'OpenClaw AI 自动生成' })
+    .setTimestamp();
+}
+```
+
+## 六、频道自动化管理
+
+### 6.1 自动创建讨论帖
+
+```javascript
+// 当消息较长且包含讨论性内容时，自动创建帖子
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+
+  const DISCUSSION_CHANNEL = '1234567890123456789';
+  if (message.channel.id !== DISCUSSION_CHANNEL) return;
+
+  // 满足条件时自动创建帖子
+  if (message.content.length > 100) {
+    const title = await callOpenClawAPI(
+      `为以下讨论消息生成一个简洁的帖子标题（不超过80个字符）:\n${message.content}`,
+      { userId: message.author.id }
+    );
+
+    const thread = await message.startThread({
+      name: title.substring(0, 100),
+      autoArchiveDuration: 1440, // 24 小时无活动后自动归档
+    });
+
+    await thread.send('讨论帖已自动创建，大家可以在这里继续讨论。\n\n*此帖子由 OpenClaw AI 自动创建*');
+  }
+});
+```
+
+### 6.2 定时推送任务
+
+```javascript
+const cron = require('node-cron');
+
+// 每天早上 9:00 推送技术简报
+cron.schedule('0 9 * * *', async () => {
+  const channel = client.channels.cache.get('1234567890123456789');
+  if (!channel) return;
+
+  const briefing = await callOpenClawAPI('生成今日技术新闻简报，包含 5 条最重要的科技新闻', {});
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle('每日技术简报')
+    .setDescription(briefing)
+    .setFooter({ text: 'OpenClaw AI 自动推送' })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+}, { timezone: "Asia/Shanghai" });
+
+// 每周五下午 5:00 推送社区周报
+cron.schedule('0 17 * * 5', async () => {
+  const channel = client.channels.cache.get('1234567890123456790');
+  if (!channel) return;
+
+  // 收集本周社区数据并生成周报
+  const weeklyData = await collectWeeklyStats(client);
+  await channel.send({ embeds: [buildWeeklyReportEmbed(weeklyData)] });
+}, { timezone: "Asia/Shanghai" });
+```
+
+## 七、部署与运维
+
+### 7.1 使用 PM2 管理 Bot 进程
+
+```bash
+# 安装 PM2
+npm install -g pm2
+
+# 启动 Bot
+pm2 start bot.js --name "openclaw-discord-bot"
+
+# 查看实时日志
+pm2 logs openclaw-discord-bot
+
+# 设置开机自启
+pm2 startup
+pm2 save
+```
+
+### 7.2 Docker 部署
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --production
+COPY . .
+CMD ["node", "bot.js"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  discord-bot:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+## 总结
+
+通过本教程，你已经学会了如何将 OpenClaw 与 Discord 深度集成。从基础的消息收发到高级的 Slash Commands、Embed 富消息和频道自动化管理，Discord Bot 的灵活性使你能根据社区需求不断扩展功能。
+
+建议的实施路线：
+1. 先完成 Bot 创建和基础消息回复
+2. 添加 Slash Commands 提升交互体验
+3. 配置自动化规则（欢迎消息、内容审核、关键词回复）
+4. 集成定时推送和社区数据报告
+
+接下来可以阅读 [微信接入方案详解](/learn/topics/wechat-integration) 或 [飞书/钉钉集成方案](/learn/topics/feishu-dingtalk) 了解更多平台的接入方式。

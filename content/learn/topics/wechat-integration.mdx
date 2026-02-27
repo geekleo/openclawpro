@@ -1,0 +1,642 @@
+---
+title: "微信接入方案详解"
+description: "全面比较个人微信、微信公众号和企业微信三种接入方案，详解企业微信应用创建、消息推送、群机器人、审批自动化等核心功能配置，附完整 YAML 配置示例与安全最佳实践"
+category: "消息平台篇"
+tags: ["微信", "WeChat", "消息平台", "企业微信"]
+date: "2026-02-15"
+---
+
+## 前言
+
+微信作为中国最主流的即时通讯工具，覆盖超过 12 亿用户，是 AI Agent 触达用户的核心渠道之一。然而，微信生态的接入方式比较复杂，涉及个人微信、微信公众号（订阅号/服务号）、企业微信（WeCom）等多种途径，每种方案的能力边界、合规风险和技术复杂度各不相同。
+
+本教程将全面比较三种主流接入方案，并以**企业微信**为核心，手把手带你完成从应用创建到消息自动化的全部配置。
+
+## 一、三种接入方案对比
+
+### 1.1 个人微信接入
+
+个人微信接入通常依赖逆向工程或非官方 API（如 itchat、wechaty 等），通过模拟登录或 Hook 方式实现消息收发。
+
+**优点：**
+- 直接触达用户的个人微信
+- 能够参与个人聊天和群聊
+- 对用户来说使用门槛最低
+
+**缺点：**
+- **严重合规风险**：违反微信使用协议，随时可能被封号
+- 稳定性差，微信版本更新可能导致失效
+- 无法获得官方技术支持
+- 不适合企业级使用
+
+**结论：** 强烈不推荐用于生产环境。个人项目仅供学习参考。
+
+### 1.2 微信公众号接入
+
+微信公众号分为订阅号和服务号，通过官方提供的消息接口实现与用户的交互。
+
+**优点：**
+- 官方支持，稳定可靠
+- 服务号支持模板消息推送
+- 拥有丰富的用户管理能力
+- 适合面向 C 端用户的场景
+
+**缺点：**
+- 订阅号每天仅能推送 1 次
+- 被动回复有 5 秒超时限制（AI 生成可能超时）
+- 服务号需要企业资质认证
+- 交互形式受限（无法像 IM 那样自由对话）
+
+**核心配置示例：**
+
+```yaml
+# OpenClaw 公众号接入配置
+skills:
+  wechat-mp:
+    enabled: true
+    config:
+      app_id: "wx1234567890abcdef"
+      app_secret: "${WECHAT_MP_SECRET}"
+      token: "your_verification_token"
+      encoding_aes_key: "your_encoding_aes_key"
+      # 消息回复模式
+      reply_mode: "async"  # async 异步模式避免 5 秒超时
+      # 超时回复占位文案
+      timeout_reply: "正在思考中，请稍候..."
+      # 最大回复长度（公众号单条消息限制）
+      max_reply_length: 600
+```
+
+### 1.3 企业微信接入（推荐）
+
+企业微信是微信官方推出的企业通讯工具，提供丰富的 API 和自建应用能力，是目前最适合 AI Agent 接入的微信方案。
+
+**优点：**
+- 官方 API，稳定且合规
+- 支持主动推送消息给员工
+- 丰富的应用能力（消息、审批、日程、文档等）
+- 群机器人支持 Webhook，接入简单
+- 可与微信互通（通过客户联系等功能）
+- 免费，无需额外费用
+
+**缺点：**
+- 需要企业资质（个人也可以注册小型团队）
+- 用户需安装企业微信 App 或关联微信
+- 部分高级 API 需要管理员权限
+
+**结论：** 强烈推荐作为微信生态接入的首选方案。
+
+### 方案对比总结
+
+| 维度 | 个人微信 | 公众号 | 企业微信 |
+|------|---------|--------|---------|
+| 合规性 | 违规 | 合规 | 合规 |
+| 稳定性 | 差 | 好 | 好 |
+| 消息推送 | 受限 | 模板消息 | 自由推送 |
+| 交互体验 | 好 | 一般 | 好 |
+| 群聊支持 | 有（风险大） | 无 | 群机器人 |
+| 适用场景 | 个人测试 | C 端用户触达 | 企业内部/团队协作 |
+| 推荐度 | 不推荐 | 视场景 | **强烈推荐** |
+
+## 二、企业微信应用创建与配置
+
+### 2.1 注册企业微信
+
+1. 访问 [企业微信官网](https://work.weixin.qq.com/) 并注册
+2. 填写企业信息（个人团队也可注册，选择「其他组织」类型）
+3. 完成管理员身份验证
+4. 登录企业微信管理后台
+
+### 2.2 创建自建应用
+
+进入管理后台后：
+
+1. 点击「应用管理」→「自建」→「创建应用」
+2. 填写应用信息：
+   - 应用名称：`OpenClaw AI 助手`
+   - 应用 Logo：上传你的应用图标
+   - 可见范围：选择可以使用该应用的部门或成员
+3. 创建完成后，记录以下关键信息：
+   - **AgentId**（应用 ID）
+   - **Secret**（应用密钥）
+   - **CorpId**（企业 ID，在「我的企业」页面查看）
+
+### 2.3 配置回调接收消息
+
+要让 OpenClaw 接收企业微信消息，需要配置接收消息的服务器地址（回调 URL）：
+
+1. 在应用详情页，点击「接收消息」→「设置 API 接收」
+2. 填写：
+   - **URL**：你的 OpenClaw 服务地址，如 `https://your-domain.com/webhook/wecom`
+   - **Token**：自定义一个验证 Token
+   - **EncodingAESKey**：点击随机生成
+
+3. 配置 IP 白名单（在「企业可信 IP」中添加你服务器的公网 IP）
+
+### 2.4 OpenClaw 企业微信完整配置
+
+```yaml
+# config/skills/wecom.yaml
+# 企业微信接入完整配置
+
+skills:
+  wecom:
+    enabled: true
+    config:
+      # === 基础凭证 ===
+      corp_id: "${WECOM_CORP_ID}"           # 企业 ID
+      agent_id: "${WECOM_AGENT_ID}"         # 应用 AgentId
+      secret: "${WECOM_SECRET}"             # 应用 Secret
+      token: "${WECOM_TOKEN}"               # 回调 Token
+      encoding_aes_key: "${WECOM_AES_KEY}"  # 回调 EncodingAESKey
+
+      # === 消息接收 ===
+      webhook:
+        path: "/webhook/wecom"     # 回调路径
+        port: 8080                 # 监听端口
+
+      # === 消息处理 ===
+      message:
+        # 支持的消息类型
+        allowed_types:
+          - text       # 文本消息
+          - image      # 图片消息
+          - voice      # 语音消息
+          - file       # 文件消息
+        # 消息去重（企业微信可能重发消息）
+        dedup:
+          enabled: true
+          ttl: 300     # 去重缓存时间（秒）
+        # AI 回复配置
+        reply:
+          max_length: 2048          # 单条消息最大长度
+          split_long_message: true  # 超长消息自动分段
+          typing_indicator: true    # 显示「正在输入」状态
+          timeout: 30               # 回复超时时间（秒）
+          timeout_message: "抱歉，处理时间较长，请稍候..."
+
+      # === 主动推送 ===
+      push:
+        # 推送频率限制
+        rate_limit:
+          per_user: 30       # 每用户每分钟最大推送数
+          per_app: 10000     # 应用每天最大推送数
+        # 推送失败重试
+        retry:
+          max_attempts: 3
+          backoff: "exponential"  # 指数退避
+
+      # === 安全配置 ===
+      security:
+        # IP 白名单校验
+        ip_whitelist:
+          enabled: true
+          allowed_ips:
+            - "101.226.0.0/16"    # 企业微信服务器 IP 段
+            - "140.207.0.0/16"
+        # 消息加解密
+        encryption:
+          mode: "aes"             # AES 加密模式
+        # 访问控制
+        access_control:
+          # 允许使用的用户列表（为空则所有可见范围内的用户都可以使用）
+          allowed_users: []
+          # 管理员列表（可执行敏感操作）
+          admin_users:
+            - "zhangsan"
+            - "lisi"
+```
+
+### 2.5 环境变量配置
+
+为安全起见，敏感信息应通过环境变量传入：
+
+```bash
+# .env 文件（勿提交到版本控制）
+WECOM_CORP_ID=ww1234567890abcdef
+WECOM_AGENT_ID=1000002
+WECOM_SECRET=your_app_secret_here
+WECOM_TOKEN=your_callback_token_here
+WECOM_AES_KEY=your_encoding_aes_key_here
+```
+
+## 三、消息推送详解
+
+### 3.1 文本消息推送
+
+```python
+import requests
+import json
+import time
+
+class WeComPusher:
+    """企业微信消息推送器"""
+
+    def __init__(self, corp_id, secret, agent_id):
+        self.corp_id = corp_id
+        self.secret = secret
+        self.agent_id = agent_id
+        self._token = None
+        self._token_expires = 0
+
+    def get_access_token(self):
+        """获取 access_token（有效期 7200 秒）"""
+        if self._token and time.time() < self._token_expires:
+            return self._token
+
+        url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+        params = {
+            "corpid": self.corp_id,
+            "corpsecret": self.secret
+        }
+        resp = requests.get(url, params=params).json()
+        if resp.get("errcode") == 0:
+            self._token = resp["access_token"]
+            self._token_expires = time.time() + resp["expires_in"] - 300
+            return self._token
+        raise Exception(f"获取 token 失败: {resp}")
+
+    def send_text(self, user_id, content):
+        """发送文本消息"""
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={self.get_access_token()}"
+        payload = {
+            "touser": user_id,        # 用户 ID，多个用 | 分隔
+            "msgtype": "text",
+            "agentid": self.agent_id,
+            "text": {"content": content},
+            "safe": 0,                 # 0 表示不保密，1 表示保密消息
+            "enable_duplicate_check": 1,
+            "duplicate_check_interval": 1800
+        }
+        resp = requests.post(url, json=payload).json()
+        return resp
+
+    def send_markdown(self, user_id, content):
+        """发送 Markdown 消息（仅企业微信客户端支持）"""
+        url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={self.get_access_token()}"
+        payload = {
+            "touser": user_id,
+            "msgtype": "markdown",
+            "agentid": self.agent_id,
+            "markdown": {"content": content}
+        }
+        resp = requests.post(url, json=payload).json()
+        return resp
+
+    def send_card(self, user_id, title, description, url, btn_text="详情"):
+        """发送卡片消息（支持跳转链接）"""
+        api_url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={self.get_access_token()}"
+        payload = {
+            "touser": user_id,
+            "msgtype": "textcard",
+            "agentid": self.agent_id,
+            "textcard": {
+                "title": title,
+                "description": description,
+                "url": url,
+                "btntxt": btn_text
+            }
+        }
+        resp = requests.post(api_url, json=payload).json()
+        return resp
+
+
+# 使用示例
+pusher = WeComPusher(
+    corp_id="ww1234567890abcdef",
+    secret="your_secret",
+    agent_id=1000002
+)
+
+# 发送文本
+pusher.send_text("zhangsan", "你好，这是来自 OpenClaw 的测试消息。")
+
+# 发送 Markdown
+pusher.send_markdown("zhangsan", """
+**每日工作摘要**
+> 日期：2026-02-15
+
+任务完成情况：
+- 已完成：<font color="info">8 项</font>
+- 进行中：<font color="warning">3 项</font>
+- 已逾期：<font color="warning">1 项</font>
+""")
+
+# 发送卡片消息
+pusher.send_card(
+    "zhangsan",
+    title="项目进度更新",
+    description="OpenClaw v2.0 版本开发进度已达 85%，预计下周发布。",
+    url="https://your-project-url.com/dashboard"
+)
+```
+
+### 3.2 消息类型选择建议
+
+| 消息类型 | 适用场景 | 微信端显示 |
+|---------|---------|-----------|
+| text | 简单通知、AI 对话回复 | 支持 |
+| markdown | 格式化报告、数据摘要 | 仅企业微信端 |
+| textcard | 带跳转链接的通知 | 支持 |
+| news | 图文消息 | 支持 |
+| file | 文件推送 | 支持 |
+| template_card | 交互式卡片 | 支持 |
+
+## 四、群机器人配置
+
+企业微信群机器人是最轻量的接入方式，无需创建应用，直接通过 Webhook 即可向群聊推送消息。
+
+### 4.1 创建群机器人
+
+1. 在企业微信群聊中，点击右上角设置
+2. 选择「群机器人」→「添加」
+3. 填写机器人名称和头像
+4. 创建完成后获得 **Webhook 地址**
+
+### 4.2 群机器人推送配置
+
+```yaml
+# config/skills/wecom-bot.yaml
+# 企业微信群机器人配置
+
+skills:
+  wecom-group-bot:
+    enabled: true
+    config:
+      bots:
+        # 可以配置多个群机器人
+        - name: "研发通知群"
+          webhook_url: "${WECOM_BOT_DEV_WEBHOOK}"
+          # 推送内容模板
+          templates:
+            daily_report: |
+              ## 每日研发简报
+              **日期**: {{date}}
+
+              ### 代码提交
+              - 总提交数: {{commit_count}}
+              - 活跃开发者: {{active_devs}}
+
+              ### 构建状态
+              {{#builds}}
+              - {{name}}: {{status}}
+              {{/builds}}
+
+            alert: |
+              ## 告警通知
+              **级别**: {{level}}
+              **服务**: {{service}}
+              **描述**: {{message}}
+              **时间**: {{timestamp}}
+
+        - name: "产品运营群"
+          webhook_url: "${WECOM_BOT_OPS_WEBHOOK}"
+          templates:
+            weekly_metrics: |
+              ## 周度运营数据
+              **统计周期**: {{period}}
+
+              | 指标 | 本周 | 上周 | 环比 |
+              |------|------|------|------|
+              {{#metrics}}
+              | {{name}} | {{current}} | {{previous}} | {{change}} |
+              {{/metrics}}
+
+      # 推送调度
+      schedules:
+        - bot: "研发通知群"
+          template: "daily_report"
+          cron: "0 18 * * 1-5"    # 工作日每天 18:00
+        - bot: "产品运营群"
+          template: "weekly_metrics"
+          cron: "0 10 * * 1"      # 每周一 10:00
+```
+
+### 4.3 群机器人推送代码
+
+```python
+import requests
+import hashlib
+import base64
+
+def send_group_bot_message(webhook_url, content, msg_type="markdown"):
+    """向企业微信群机器人发送消息"""
+    payload = {
+        "msgtype": msg_type,
+        msg_type: {"content": content}
+    }
+    resp = requests.post(webhook_url, json=payload)
+    result = resp.json()
+    if result.get("errcode") != 0:
+        print(f"发送失败: {result}")
+    return result
+
+def send_group_bot_image(webhook_url, image_base64, image_md5):
+    """向群聊发送图片"""
+    payload = {
+        "msgtype": "image",
+        "image": {
+            "base64": image_base64,
+            "md5": image_md5
+        }
+    }
+    return requests.post(webhook_url, json=payload).json()
+
+# 使用示例
+webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=your-key"
+send_group_bot_message(webhook, """
+## 构建通知
+- **项目**: OpenClaw Pro
+- **分支**: main
+- **状态**: <font color="info">构建成功</font>
+- **耗时**: 3 分 22 秒
+""")
+```
+
+## 五、审批自动化
+
+企业微信提供了审批 API，可以通过 OpenClaw 实现审批流程的自动化。
+
+### 5.1 审批配置
+
+```yaml
+# config/skills/wecom-approval.yaml
+# 企业微信审批自动化配置
+
+skills:
+  wecom-approval:
+    enabled: true
+    config:
+      # 审批模板 ID（在企业微信管理后台获取）
+      templates:
+        leave: "C4NzxxxxxxxxxxxxxxxxJw"        # 请假
+        expense: "C4Nzxxxxxxxxxxxxxxxxab"      # 报销
+        purchase: "C4Nzxxxxxxxxxxxxxxxxcd"     # 采购
+
+      # 自动化规则
+      automation:
+        # 监听审批状态变化
+        on_status_change:
+          - template: "leave"
+            status: "approved"
+            actions:
+              - type: "notify"
+                target: "applicant"
+                message: "你的请假申请已通过，请假时间：{{start_date}} 至 {{end_date}}"
+              - type: "update_calendar"
+                event_title: "{{applicant_name}} 请假"
+
+          - template: "expense"
+            status: "approved"
+            actions:
+              - type: "notify"
+                target: "finance_group"
+                message: "新的报销已通过审批，金额：{{amount}} 元，请及时处理打款。"
+
+        # 审批提醒
+        reminders:
+          - condition: "pending > 24h"   # 超过 24 小时未处理
+            action:
+              type: "notify"
+              target: "approver"
+              message: "你有一条审批已等待超过 24 小时，请及时处理。"
+            repeat: "12h"                # 每 12 小时提醒一次
+```
+
+### 5.2 审批操作 API 示例
+
+```python
+def create_approval(access_token, template_id, applicant, approvers, form_data):
+    """发起审批申请"""
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/oa/applyevent?access_token={access_token}"
+    payload = {
+        "creator_userid": applicant,
+        "template_id": template_id,
+        "use_template_approver": 0,
+        "approver": [
+            {"attr": 1, "userid": approvers}   # attr=1 表示「或签」
+        ],
+        "apply_data": {
+            "contents": form_data
+        },
+        "summary_list": [
+            {
+                "summary_info": [
+                    {"text": "申请人", "lang": "zh_CN"},
+                    {"text": applicant, "lang": "zh_CN"}
+                ]
+            }
+        ]
+    }
+    return requests.post(url, json=payload).json()
+
+def get_approval_detail(access_token, sp_no):
+    """查询审批详情"""
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/oa/getapprovaldetail?access_token={access_token}"
+    payload = {"sp_no": sp_no}
+    return requests.post(url, json=payload).json()
+```
+
+## 六、安全注意事项
+
+### 6.1 凭证管理
+
+```yaml
+# 安全配置最佳实践
+security:
+  credentials:
+    # 永远不要在配置文件中硬编码凭证
+    storage: "env"          # 使用环境变量
+    # 或使用密钥管理服务
+    # storage: "vault"
+    # vault_addr: "https://vault.your-domain.com"
+    # vault_path: "secret/openclaw/wecom"
+
+  # access_token 缓存
+  token_cache:
+    backend: "redis"        # 使用 Redis 缓存 token
+    key_prefix: "openclaw:wecom:token:"
+    # 不要将 token 写入日志
+    log_redact: true
+
+  # 消息安全
+  message:
+    # 开启消息加密
+    encryption: true
+    # 消息内容不记录到日志（保护隐私）
+    log_content: false
+    # 敏感信息过滤
+    sensitive_filter:
+      enabled: true
+      patterns:
+        - "\\d{17}[0-9Xx]"     # 身份证号
+        - "\\d{16,19}"          # 银行卡号
+        - "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}" # 邮箱
+```
+
+### 6.2 IP 白名单
+
+企业微信要求配置企业可信 IP，确保只有你的服务器 IP 可以调用 API：
+
+```bash
+# 获取当前服务器公网 IP
+curl -s https://ifconfig.me
+
+# 在企业微信管理后台 - 应用详情 - 企业可信 IP 中添加
+# 支持 IP 和 CIDR 格式
+# 例如: 123.45.67.89 或 123.45.67.0/24
+```
+
+### 6.3 回调签名验证
+
+所有来自企业微信的回调请求都应验证签名，防止伪造：
+
+```python
+import hashlib
+
+def verify_callback_signature(token, timestamp, nonce, echostr, msg_signature):
+    """验证企业微信回调签名"""
+    sort_list = sorted([token, timestamp, nonce, echostr])
+    sha1 = hashlib.sha1("".join(sort_list).encode()).hexdigest()
+    return sha1 == msg_signature
+```
+
+## 七、常见问题排查
+
+### 7.1 回调验证失败
+
+最常见的原因是 Token 或 EncodingAESKey 不一致。请确保 OpenClaw 配置中的值与企业微信管理后台中的完全一致。
+
+```bash
+# 测试回调是否可达
+curl -v "https://your-domain.com/webhook/wecom?msg_signature=xxx&timestamp=xxx&nonce=xxx&echostr=xxx"
+```
+
+### 7.2 消息发送报错 60020
+
+错误码 60020 表示「不合法的 access_token」，通常是因为 token 过期或 secret 错误：
+
+```python
+# 检查 access_token 是否有效
+def check_token(token):
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/get_api_domain_ip?access_token={token}"
+    resp = requests.get(url).json()
+    print(f"Token 状态: errcode={resp.get('errcode', 0)}")
+    return resp.get("errcode", 0) == 0
+```
+
+### 7.3 推送频率限制
+
+企业微信对消息推送有频率限制，应用消息每企业每天限 10000 条。建议：
+
+- 合并同类通知，减少推送频率
+- 重要消息使用主动推送，非重要消息使用群机器人
+- 设置本地消息队列，控制推送速率
+
+## 总结
+
+企业微信是当前将 OpenClaw AI Agent 接入微信生态的最佳方案。它兼具官方合规性和丰富的 API 能力，无论是个人消息推送、群聊通知还是审批自动化都能很好地支持。
+
+在实际使用中，建议从群机器人开始入手（最简单），再逐步扩展到自建应用和审批自动化。同时务必重视安全配置，做好凭证管理和消息加密。
+
+下一步，你可以阅读 [飞书/钉钉集成方案](/learn/topics/feishu-dingtalk) 了解其他企业通讯平台的接入方式，或者结合 [日程管理与智能提醒](/learn/topics/calendar-management) 打造完整的办公自动化工作流。

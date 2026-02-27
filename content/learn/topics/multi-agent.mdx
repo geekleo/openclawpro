@@ -1,0 +1,615 @@
+---
+title: "多 Agent 协作架构设计"
+description: "深入讲解多 Agent 协作架构的设计理念与实践方法，涵盖 Agent 角色定义与职责分工、通信机制与消息传递、Orchestrator 与自组织模式、OpenClaw 多 Agent 配置、代码审查流水线实战、错误处理与容错、性能与成本优化以及监控可观测性"
+category: "开发者篇"
+tags: ["Multi-Agent", "架构", "协作", "高级"]
+date: "2026-02-03"
+---
+
+## 什么是多 Agent 架构？
+
+多 Agent 架构（Multi-Agent Architecture）是一种将复杂任务分解为多个专业化 Agent 协同完成的系统设计模式。每个 Agent 拥有独立的角色定位、知识范围和能力边界，它们通过定义良好的通信协议协作完成超出单个 Agent 能力范围的复杂任务。
+
+与传统的单 Agent 模式相比，多 Agent 架构的核心优势在于：
+
+- **专业分工**：每个 Agent 专注于擅长的领域，减少"万能 Agent"的幻觉和误差
+- **并行处理**：多个 Agent 可以并行执行独立子任务，大幅提升效率
+- **可扩展性**：新增能力只需添加新的 Agent，不影响已有架构
+- **鲁棒性**：单个 Agent 的失败不会导致整个系统崩溃
+
+### 典型应用场景
+
+- **软件开发**：架构师 Agent 设计方案 → 开发 Agent 编写代码 → 测试 Agent 编写和运行测试 → 审查 Agent 进行代码审查
+- **内容生产**：调研 Agent 收集资料 → 写作 Agent 撰写草稿 → 编辑 Agent 校对修改 → 设计 Agent 排版美化
+- **数据分析**：采集 Agent 获取数据 → 清洗 Agent 预处理 → 分析 Agent 建模分析 → 报告 Agent 生成报表
+- **客户服务**：分诊 Agent 理解需求 → 专业 Agent 解答问题 → 跟进 Agent 确认满意度
+
+## Agent 角色定义与职责分工
+
+设计多 Agent 系统的第一步是定义清晰的角色。每个 Agent 需要有明确的：
+
+1. **身份标识（Identity）**：Agent 的名称和唯一标识符
+2. **系统提示词（System Prompt）**：定义 Agent 的人设、能力边界和行为准则
+3. **工具集（Tools）**：Agent 可使用的 Skill 和 MCP Server
+4. **输入输出协议**：Agent 接受什么格式的输入，产出什么格式的输出
+
+以下是一个代码审查流水线的角色定义示例：
+
+```yaml
+# agents.yaml - Agent 角色定义配置
+
+agents:
+  # 架构分析 Agent
+  architect:
+    name: "架构分析师"
+    model: "claude-sonnet-4-20250514"
+    system_prompt: |
+      你是一名资深软件架构师。你的职责是：
+      1. 分析代码变更的架构影响
+      2. 评估设计模式的合理性
+      3. 识别潜在的架构风险
+      4. 提出架构改进建议
+
+      你只关注架构层面的问题，不负责具体代码实现细节。
+      输出格式为结构化的架构分析报告。
+    tools:
+      - mcp: github
+      - skill: code-analyzer
+    max_tokens: 4096
+    temperature: 0.3
+
+  # 代码审查 Agent
+  reviewer:
+    name: "代码审查员"
+    model: "claude-sonnet-4-20250514"
+    system_prompt: |
+      你是一名严格的代码审查员。你的职责是：
+      1. 检查代码风格和规范一致性
+      2. 发现潜在的 Bug 和逻辑错误
+      3. 评估代码可读性和可维护性
+      4. 检查边界条件和异常处理
+
+      你需要逐文件、逐函数地进行审查，给出具体的行号和修改建议。
+    tools:
+      - mcp: github
+      - mcp: filesystem
+      - skill: linter
+    max_tokens: 8192
+    temperature: 0.2
+
+  # 安全扫描 Agent
+  security:
+    name: "安全审计员"
+    model: "claude-sonnet-4-20250514"
+    system_prompt: |
+      你是一名网络安全专家。你的职责是：
+      1. 扫描代码中的安全漏洞
+      2. 检查敏感信息泄露风险（API Key、密码等）
+      3. 评估依赖包的安全性
+      4. 验证输入校验和权限检查
+
+      对每个发现的安全问题，需要给出风险等级（Critical/High/Medium/Low）
+      和具体的修复建议。
+    tools:
+      - skill: security-scanner
+      - skill: dependency-checker
+    max_tokens: 4096
+    temperature: 0.1
+
+  # 综合报告 Agent
+  reporter:
+    name: "报告汇总员"
+    model: "claude-sonnet-4-20250514"
+    system_prompt: |
+      你是一名技术报告撰写专家。你的职责是：
+      1. 汇总各个审查员的分析结果
+      2. 去重和整理问题列表
+      3. 按优先级排序
+      4. 生成清晰易读的审查报告
+
+      报告应包含：总体评估、关键问题列表、改进建议和风险提示。
+    tools:
+      - mcp: github
+    max_tokens: 4096
+    temperature: 0.4
+```
+
+## 通信机制与消息传递
+
+多 Agent 之间的通信是架构设计的核心。OpenClaw 支持多种通信模式：
+
+### 消息格式
+
+Agent 之间传递的消息遵循统一的格式：
+
+```typescript
+interface AgentMessage {
+  id: string;                    // 消息唯一标识
+  from: string;                  // 发送者 Agent ID
+  to: string | string[];         // 接收者 Agent ID（支持多播）
+  type: 'request' | 'response' | 'event' | 'error';
+  payload: {
+    task?: string;               // 任务描述
+    data?: unknown;              // 携带的数据
+    context?: Record<string, unknown>;  // 上下文信息
+    priority?: 'low' | 'normal' | 'high' | 'critical';
+  };
+  metadata: {
+    timestamp: string;
+    traceId: string;             // 链路追踪 ID
+    parentMessageId?: string;    // 父消息 ID（用于跟踪对话链）
+    ttl?: number;                // 消息存活时间（毫秒）
+  };
+}
+```
+
+### 通信模式
+
+```
+1. 请求-响应模式 (Request-Response)
+   ┌──────┐  request   ┌──────┐
+   │Agent A├───────────►│Agent B│
+   │       │◄───────────┤      │
+   └──────┘  response   └──────┘
+
+2. 发布-订阅模式 (Pub-Sub)
+   ┌──────┐  publish    ┌─────────┐  notify   ┌──────┐
+   │Agent A├───────────►│  Topic   ├──────────►│Agent B│
+   │       │            │  Bus     ├──────────►│Agent C│
+   └──────┘             └─────────┘            └──────┘
+
+3. 管道模式 (Pipeline)
+   ┌──────┐   ┌──────┐   ┌──────┐   ┌──────┐
+   │Agent A├──►│Agent B├──►│Agent C├──►│Agent D│
+   └──────┘   └──────┘   └──────┘   └──────┘
+
+4. 广播模式 (Broadcast)
+                        ┌──────┐
+                   ┌───►│Agent B│
+   ┌──────┐       │    └──────┘
+   │Agent A├───────┤
+   │       │       │    ┌──────┐
+   └──────┘       └───►│Agent C│
+                        └──────┘
+```
+
+## Orchestrator vs 自组织模式
+
+多 Agent 协作有两种主要的组织模式：
+
+### Orchestrator（编排器）模式
+
+由一个中央调度 Agent 负责任务分配、进度跟踪和结果汇总：
+
+```yaml
+# orchestrator-config.yaml
+
+orchestrator:
+  name: "任务编排器"
+  model: "claude-sonnet-4-20250514"
+  mode: "orchestrator"
+
+  # 编排策略
+  strategy:
+    type: "sequential_parallel"  # 支持: sequential, parallel, sequential_parallel, adaptive
+    max_parallel: 3              # 最大并行 Agent 数
+    timeout: 300000              # 总超时时间（毫秒）
+
+  # 任务流水线定义
+  pipeline:
+    - stage: "分析"
+      agents: ["architect"]
+      parallel: false
+      timeout: 60000
+
+    - stage: "审查"
+      agents: ["reviewer", "security"]
+      parallel: true             # 代码审查和安全审查可以并行
+      timeout: 120000
+
+    - stage: "汇总"
+      agents: ["reporter"]
+      parallel: false
+      depends_on: ["分析", "审查"]  # 等待前面的阶段完成
+      timeout: 60000
+
+  # 失败策略
+  on_failure:
+    strategy: "retry_then_skip"  # retry, skip, retry_then_skip, abort
+    max_retries: 2
+    fallback_agent: "reporter"   # 失败时由哪个 Agent 兜底
+```
+
+Orchestrator 模式的优点是控制流清晰、易于调试和监控；缺点是中央调度器可能成为瓶颈。
+
+### 自组织模式
+
+Agent 之间通过消息传递自主协作，没有中央调度者：
+
+```yaml
+# self-organized-config.yaml
+
+collaboration:
+  mode: "self-organized"
+
+  # 共享黑板（Blackboard）
+  blackboard:
+    enabled: true
+    storage: "redis"
+    ttl: 3600
+
+  # Agent 触发规则
+  agents:
+    architect:
+      trigger:
+        - event: "new_pull_request"
+        - event: "code_change_detected"
+      publishes:
+        - topic: "architecture_review_complete"
+
+    reviewer:
+      trigger:
+        - event: "architecture_review_complete"
+        - event: "new_pull_request"
+      publishes:
+        - topic: "code_review_complete"
+
+    security:
+      trigger:
+        - event: "new_pull_request"
+      publishes:
+        - topic: "security_scan_complete"
+
+    reporter:
+      trigger:
+        - event: "code_review_complete"
+          condition: "all"       # 等待所有审查完成
+        - event: "security_scan_complete"
+      publishes:
+        - topic: "review_report_ready"
+
+  # 协商协议（当 Agent 意见冲突时）
+  consensus:
+    method: "voting"             # voting, priority, escalate
+    quorum: 0.6                  # 60% 以上同意即通过
+    tiebreaker: "architect"      # 平票时由架构师决定
+```
+
+### 如何选择？
+
+| 维度 | Orchestrator 模式 | 自组织模式 |
+|------|-------------------|-----------|
+| 适用场景 | 流程固定、步骤清晰的任务 | 动态变化、需要灵活响应的任务 |
+| 复杂度 | 低（逻辑集中） | 高（逻辑分散） |
+| 可扩展性 | 中等 | 高 |
+| 调试难度 | 低 | 高 |
+| 容错性 | 依赖编排器 | 天然分布式容错 |
+
+## OpenClaw 多 Agent 配置
+
+在 OpenClaw 中配置多 Agent 系统，需要在项目配置中定义 `agents.yaml` 和 `workflows.yaml`：
+
+```yaml
+# workflows.yaml - 工作流定义
+
+workflows:
+  code-review:
+    name: "代码审查工作流"
+    description: "自动化代码审查流水线"
+    trigger:
+      - type: "webhook"
+        event: "pull_request.opened"
+      - type: "manual"
+        command: "/review"
+
+    # 全局上下文（所有 Agent 共享）
+    context:
+      repository: "{{trigger.repository}}"
+      pr_number: "{{trigger.pr_number}}"
+      changed_files: "{{trigger.changed_files}}"
+
+    steps:
+      - id: "fetch-changes"
+        agent: "architect"
+        action: "analyze"
+        input:
+          task: "获取并分析 PR #{{context.pr_number}} 的代码变更"
+        output:
+          save_as: "architecture_analysis"
+
+      - id: "parallel-review"
+        parallel:
+          - id: "code-review"
+            agent: "reviewer"
+            action: "review"
+            input:
+              task: "审查以下代码变更"
+              context: "{{steps.fetch-changes.output}}"
+            output:
+              save_as: "code_review_result"
+
+          - id: "security-scan"
+            agent: "security"
+            action: "scan"
+            input:
+              task: "对代码变更进行安全扫描"
+              context: "{{steps.fetch-changes.output}}"
+            output:
+              save_as: "security_scan_result"
+
+      - id: "generate-report"
+        agent: "reporter"
+        action: "summarize"
+        input:
+          architecture: "{{steps.fetch-changes.output}}"
+          code_review: "{{steps.parallel-review.code-review.output}}"
+          security: "{{steps.parallel-review.security-scan.output}}"
+        output:
+          save_as: "final_report"
+
+      - id: "post-comment"
+        action: "github.comment"
+        input:
+          pr_number: "{{context.pr_number}}"
+          body: "{{steps.generate-report.output.report}}"
+```
+
+## 实战：代码审查流水线
+
+下面展示完整的代码审查流水线执行流程：
+
+```
+时序图：代码审查流水线
+
+开发者          OpenClaw         Architect       Reviewer        Security        Reporter
+  │               │                │               │               │               │
+  │  提交 PR      │                │               │               │               │
+  ├──────────────►│                │               │               │               │
+  │               │  分配任务       │               │               │               │
+  │               ├───────────────►│               │               │               │
+  │               │                │ 分析架构影响    │               │               │
+  │               │                │───────┐       │               │               │
+  │               │                │       │       │               │               │
+  │               │                │◄──────┘       │               │               │
+  │               │  架构分析完成    │               │               │               │
+  │               │◄───────────────┤               │               │               │
+  │               │                                │               │               │
+  │               │  并行分发审查任务                 │               │               │
+  │               ├────────────────────────────────►│               │               │
+  │               ├──────────────────────────────────────────────►│               │
+  │               │                                │               │               │
+  │               │                                │ 代码审查       │ 安全扫描       │
+  │               │                                │──────┐       │──────┐        │
+  │               │                                │      │       │      │        │
+  │               │                                │◄─────┘       │◄─────┘        │
+  │               │                                │               │               │
+  │               │  收集审查结果                     │               │               │
+  │               │◄───────────────────────────────┤               │               │
+  │               │◄─────────────────────────────────────────────┤               │
+  │               │                                                               │
+  │               │  汇总生成报告                                                   │
+  │               ├──────────────────────────────────────────────────────────────►│
+  │               │                                                               │
+  │               │◄──────────────────────────────────────────────────────────────┤
+  │               │                                                               │
+  │  PR 评论通知   │                                                               │
+  │◄──────────────┤                                                               │
+  │               │                                                               │
+```
+
+## 错误处理与容错
+
+多 Agent 系统中，错误处理需要考虑多种故障场景：
+
+```typescript
+// error-handling.ts - 多 Agent 错误处理策略
+
+interface RetryPolicy {
+  maxAttempts: number;
+  backoffMs: number;
+  backoffMultiplier: number;
+  maxBackoffMs: number;
+}
+
+interface FallbackConfig {
+  agent: string;
+  simplifiedPrompt: boolean;
+}
+
+interface AgentErrorHandler {
+  agentId: string;
+  retry: RetryPolicy;
+  fallback?: FallbackConfig;
+  circuitBreaker: {
+    failureThreshold: number;   // 连续失败次数阈值
+    recoveryTimeMs: number;     // 熔断恢复时间
+  };
+  onError: (error: AgentError) => ErrorAction;
+}
+
+type ErrorAction = 'retry' | 'fallback' | 'skip' | 'abort';
+
+// 错误处理配置
+const errorHandlers: AgentErrorHandler[] = [
+  {
+    agentId: 'reviewer',
+    retry: {
+      maxAttempts: 3,
+      backoffMs: 1000,
+      backoffMultiplier: 2,
+      maxBackoffMs: 10000,
+    },
+    fallback: {
+      agent: 'reporter',
+      simplifiedPrompt: true,
+    },
+    circuitBreaker: {
+      failureThreshold: 5,
+      recoveryTimeMs: 60000,
+    },
+    onError: (error) => {
+      if (error.type === 'RATE_LIMIT') return 'retry';
+      if (error.type === 'TIMEOUT') return 'retry';
+      if (error.type === 'MODEL_ERROR') return 'fallback';
+      return 'skip';
+    },
+  },
+];
+
+// 熔断器实现
+class CircuitBreaker {
+  private failures = 0;
+  private lastFailureTime = 0;
+  private state: 'closed' | 'open' | 'half-open' = 'closed';
+
+  constructor(
+    private threshold: number,
+    private recoveryMs: number
+  ) {}
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.state === 'open') {
+      if (Date.now() - this.lastFailureTime > this.recoveryMs) {
+        this.state = 'half-open';
+      } else {
+        throw new Error('Circuit breaker is OPEN - agent temporarily unavailable');
+      }
+    }
+
+    try {
+      const result = await fn();
+      this.onSuccess();
+      return result;
+    } catch (error) {
+      this.onFailure();
+      throw error;
+    }
+  }
+
+  private onSuccess() {
+    this.failures = 0;
+    this.state = 'closed';
+  }
+
+  private onFailure() {
+    this.failures++;
+    this.lastFailureTime = Date.now();
+    if (this.failures >= this.threshold) {
+      this.state = 'open';
+    }
+  }
+}
+```
+
+## 性能与成本优化
+
+多 Agent 系统的性能和成本优化是生产环境部署的关键考量：
+
+```yaml
+# optimization.yaml
+
+optimization:
+  # 模型分级策略 —— 根据任务复杂度选择合适的模型
+  model_routing:
+    rules:
+      - condition: "task.complexity == 'low'"
+        model: "claude-haiku-4-20250514"      # 简单任务用小模型
+        max_tokens: 1024
+      - condition: "task.complexity == 'medium'"
+        model: "claude-sonnet-4-20250514"     # 中等任务用中等模型
+        max_tokens: 4096
+      - condition: "task.complexity == 'high'"
+        model: "claude-opus-4-20250514"       # 复杂任务用最强模型
+        max_tokens: 8192
+
+  # 缓存策略
+  caching:
+    enabled: true
+    strategy: "semantic"          # exact, semantic, embedding
+    ttl: 3600
+    max_size: "500MB"
+    # 相似度阈值（仅 semantic 模式）
+    similarity_threshold: 0.95
+
+  # 并行控制
+  concurrency:
+    max_parallel_agents: 5
+    max_parallel_workflows: 3
+    queue_strategy: "priority"    # fifo, priority, fair
+
+  # Token 预算管理
+  budget:
+    daily_limit: 1000000          # 每日 Token 上限
+    per_workflow_limit: 50000     # 单次工作流 Token 上限
+    alert_threshold: 0.8          # 80% 时告警
+    on_exceed: "queue"            # reject, queue, downgrade
+```
+
+### 成本估算公式
+
+```
+单次工作流成本 ≈ Σ(Agent_i 的输入Token × 输入单价 + Agent_i 的输出Token × 输出单价)
+
+示例（代码审查流水线）：
+- Architect:  输入 ~3000 tokens, 输出 ~2000 tokens
+- Reviewer:   输入 ~5000 tokens, 输出 ~4000 tokens
+- Security:   输入 ~3000 tokens, 输出 ~1500 tokens
+- Reporter:   输入 ~8000 tokens, 输出 ~3000 tokens
+- 总计: 输入 ~19000 tokens, 输出 ~10500 tokens
+```
+
+## 监控与可观测性
+
+生产环境中的多 Agent 系统需要完善的监控方案：
+
+```yaml
+# monitoring.yaml
+
+monitoring:
+  # 指标采集
+  metrics:
+    enabled: true
+    exporter: "prometheus"
+    endpoint: "/metrics"
+    labels:
+      service: "openclaw-multi-agent"
+
+    custom_metrics:
+      - name: "agent_execution_duration_seconds"
+        type: "histogram"
+        description: "Agent 执行耗时"
+        labels: ["agent_id", "workflow_id", "status"]
+        buckets: [0.5, 1, 2, 5, 10, 30, 60, 120]
+
+      - name: "agent_token_usage_total"
+        type: "counter"
+        description: "Agent Token 使用量"
+        labels: ["agent_id", "model", "direction"]
+
+      - name: "workflow_completion_total"
+        type: "counter"
+        description: "工作流完成计数"
+        labels: ["workflow_id", "status"]
+
+  # 链路追踪
+  tracing:
+    enabled: true
+    exporter: "otlp"
+    endpoint: "http://jaeger:4318"
+    sample_rate: 1.0
+    propagation: "w3c"
+
+  # 日志
+  logging:
+    level: "info"
+    format: "json"
+    output:
+      - type: "stdout"
+      - type: "file"
+        path: "/var/log/openclaw/multi-agent.log"
+        rotation:
+          max_size: "100MB"
+          max_files: 10
+```
+
+通过以上完整的架构设计和配置示例，你已经具备了在 OpenClaw 中构建多 Agent 协作系统的能力。建议从简单的两个 Agent 协作开始实践，逐步增加复杂度，在实践中掌握多 Agent 系统设计的精髓。
