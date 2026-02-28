@@ -11,11 +11,29 @@ hook: "自动化爬虫实战 → 精品课 Module 4"
 
 前三天我们学习了对话技巧和文件操作，但这些都是在本地完成的。今天，我们将解锁 OpenClaw 最强大的能力之一——联网。让你的 AI 助手能够实时获取互联网信息，调用外部服务。
 
+先来看一下离线 AI 和联网 AI 的能力差距：
+
+| 能力 | 离线模式 | 联网模式 |
+|------|----------|----------|
+| 回答通用知识 | 依赖训练数据，可能过时 | 实时获取最新信息 |
+| 查询实时数据 | 无法做到 | 搜索引擎 + API 实时查询 |
+| 监控价格/状态 | 无法做到 | 定时抓取网页并对比 |
+| 与外部服务联动 | 无法做到 | 调用 API 读写外部系统 |
+| 信息交叉验证 | 仅凭已有知识 | 多来源对比，给出引用 |
+
+简单来说，联网之后的 OpenClaw 从一个「博学但封闭的顾问」变成了一个「能调动整个互联网资源的行动者」。
+
+---
+
 ### 联网搜索
 
 OpenClaw 内置了强大的联网搜索引擎，可以实时获取最新的网络信息。这意味着它不再受训练数据时间的限制。
 
-#### 基本搜索
+#### 搜索模式
+
+OpenClaw 提供三种搜索模式，适用于不同场景：
+
+**基础搜索（Basic）**——默认模式，快速返回摘要结果：
 
 ```bash
 > 搜索一下 2026 年最流行的前端框架有哪些
@@ -25,19 +43,156 @@ OpenClaw 内置了强大的联网搜索引擎，可以实时获取最新的网�
 
 OpenClaw 会自动选择合适的搜索引擎，获取结果并进行智能摘要，给你最精炼的答案。
 
-#### 深度搜索
-
-当你需要更全面的信息时，可以使用深度搜索模式：
+**深度搜索（Deep）**——多来源交叉验证，适合需要全面信息的场景：
 
 ```bash
 > /search --deep "Docker Compose v3 和 v2 的区别"
 ```
 
-深度搜索会访问多个来源，交叉验证信息，并给出带引用来源的完整报告。
+**学术搜索（Academic）**——专门搜索学术论文和技术文献：
+
+```bash
+> /search --academic "transformer attention mechanism 最新优化方法"
+```
+
+学术搜索会优先从 arXiv、Google Scholar、Semantic Scholar 等学术来源获取结果，并自动提取摘要、引用次数和关键结论。
+
+#### 搜索操作符与过滤器
+
+你可以使用操作符精细控制搜索行为：
+
+```bash
+# 限定时间范围
+> /search --after 2026-01-01 "OpenClaw 新功能"
+
+# 限定来源网站
+> /search --site github.com "openclaw plugins"
+
+# 排除特定网站
+> /search --exclude reddit.com "React vs Vue 性能对比"
+
+# 限定语言
+> /search --lang zh "大语言模型微调最佳实践"
+
+# 组合使用多个过滤器
+> /search --deep --after 2025-06-01 --lang en "rust async runtime benchmarks"
+```
+
+#### 多来源搜索
+
+当你需要从多个平台同时获取信息时，可以使用多来源搜索：
+
+```bash
+> /search --sources "google,github,stackoverflow" "Python asyncio connection pool 最佳实践"
+```
+
+OpenClaw 会同时从指定的来源搜索，自动去重并合并结果，最终给出一份综合性的回答。
+
+#### 搜索结果质量评估
+
+OpenClaw 会自动对搜索结果进行质量评估，标注以下信息：
+
+- **来源可信度**：根据网站权威性打分（高/中/低）
+- **时效性**：标注内容发布时间，提示信息是否可能过时
+- **一致性**：当多个来源信息不一致时主动提醒，列出分歧点
+
+#### 实战搜索示例
+
+**示例 1：技术选型调研**
+
+```bash
+> 我们团队在考虑消息队列方案，请搜索对比 Kafka、RabbitMQ 和 Pulsar 在
+  2025-2026 年的最新性能基准测试和社区活跃度
+```
+
+预期输出：OpenClaw 会返回三个方案的性能数据对比表格、社区 star 数趋势、以及各自适合的使用场景总结。
+
+**示例 2：Bug 解决**
+
+```bash
+> /search --site stackoverflow.com,github.com "Next.js 14 hydration mismatch error 解决方案"
+```
+
+预期输出：按相关度排序的解决方案列表，每条包含问题描述、解决步骤和社区投票数。
+
+**示例 3：行业动态追踪**
+
+```bash
+> /search --deep --after 2026-02-01 "AI 编程助手市场格局变化"
+```
+
+预期输出：一份包含多个来源引用的简报，涵盖最新产品发布、市场份额变化和行业分析师观点。
+
+**示例 4：学术文献检索**
+
+```bash
+> /search --academic "RAG retrieval augmented generation 最新改进 2025 2026"
+```
+
+预期输出：按引用次数排序的论文列表，每篇包含标题、作者、摘要和核心创新点。
+
+---
+
+### 深度搜索模式
+
+深度搜索值得单独讲解，因为它是 OpenClaw 联网能力中最强大的功能之一。
+
+#### 工作原理
+
+深度搜索和基础搜索的区别在于：
+
+1. **多轮搜索**：不是搜一次就结束，而是根据初始结果自动生成追问查询，进行 3-5 轮迭代搜索
+2. **多来源交叉验证**：同一事实至少从 2 个独立来源确认
+3. **矛盾检测**：当来源之间存在矛盾时，主动标注并分析原因
+4. **引用追踪**：每个结论都附带原始来源链接
+
+#### 配置选项
+
+你可以在工作空间配置中自定义深度搜索的行为：
+
+```yaml
+search:
+  deep:
+    max_rounds: 5          # 最大搜索轮数，默认 3
+    min_sources: 3         # 每个结论最少引用来源数
+    language_priority:     # 语言优先级
+      - zh
+      - en
+    timeout: 60            # 超时时间（秒）
+    output_format: report  # 输出格式：report（报告）| bullet（要点）| table（表格）
+```
+
+#### 典型使用场景
+
+**技术调研**：深入对比多个技术方案的优劣，每个结论都有出处。
+
+```bash
+> /search --deep "Kubernetes vs Docker Swarm 2026 年生产环境对比，
+  包括性能、学习曲线、社区支持和企业采用率"
+```
+
+**事实核查**：验证某个技术声明是否准确。
+
+```bash
+> /search --deep "Bun 1.0 是否真的比 Node.js 快 3 倍？请从多个基准测试来源验证"
+```
+
+**市场分析**：收集行业数据并形成分析报告。
+
+```bash
+> /search --deep "2026 年中国企业级 SaaS 市场规模和增长趋势，
+  主要玩家和市场份额"
+```
+
+---
 
 ### 网页内容抓取
 
-除了搜索，OpenClaw 还能直接抓取和解析网页内容：
+除了搜索，OpenClaw 还能直接抓取和解析网页内容。
+
+#### 基础抓取
+
+最简单的用法——给出 URL，获取内容：
 
 ```bash
 > 请访问 https://example.com/docs/api 并提取 API 文档的核心内容
@@ -45,75 +200,577 @@ OpenClaw 会自动选择合适的搜索引擎，获取结果并进行智能摘�
 > 抓取 https://news.example.com 的今日头条，整理成中文摘要
 ```
 
-这个功能在以下场景中特别有用：
+#### 结构化数据提取
 
-- **竞品分析**：快速浏览竞争对手的产品页面
-- **文档查阅**：直接从官方文档获取最新信息
-- **内容聚合**：从多个来源收集和整理信息
+当你需要从网页中提取特定结构的数据时，可以指定提取模板：
+
+```bash
+> 请访问 https://example.com/products 并提取所有产品信息，
+  包括：产品名称、价格、评分、评价数量，输出为 JSON 格式
+```
+
+OpenClaw 会智能识别页面中的数据结构，返回类似以下格式的结果：
+
+```json
+[
+  {
+    "name": "产品 A",
+    "price": 299,
+    "rating": 4.8,
+    "reviews": 1253
+  },
+  {
+    "name": "产品 B",
+    "price": 199,
+    "rating": 4.5,
+    "reviews": 876
+  }
+]
+```
+
+#### 处理动态页面
+
+部分网页使用 JavaScript 动态渲染内容，普通抓取可能只拿到空壳。OpenClaw 提供了渲染模式来处理这种情况：
+
+```bash
+> /fetch --render https://example.com/dashboard
+```
+
+`--render` 参数会让 OpenClaw 在无头浏览器中加载页面，等待 JavaScript 执行完毕后再提取内容。
+
+#### 分页处理
+
+当目标数据分布在多个分页中时：
+
+```bash
+> /fetch --paginate --max-pages 5 https://example.com/blog
+  提取每篇文章的标题、发布日期和摘要
+```
+
+OpenClaw 会自动检测分页按钮或「下一页」链接，依次抓取指定数量的页面，最终合并所有结果。
+
+#### 请求频率控制
+
+抓取时请注意对目标网站的负载影响：
+
+```bash
+> /fetch --delay 2000 --max-pages 10 https://example.com/listings
+```
+
+`--delay 2000` 表示每次请求之间间隔 2 秒，避免给目标网站造成压力。
+
+#### 实战抓取示例
+
+**示例 1：竞品分析**
+
+```bash
+> 请访问以下三个产品页面，提取各自的核心功能列表和定价方案，
+  整理成对比表格：
+  - https://competitor-a.com/pricing
+  - https://competitor-b.com/pricing
+  - https://competitor-c.com/pricing
+```
+
+**示例 2：文档同步**
+
+```bash
+> 请抓取 https://docs.example.com/api/v2 的完整 API 文档，
+  转换为 Markdown 格式保存到 ./docs/external-api.md
+```
+
+**示例 3：招聘信息聚合**
+
+```bash
+> /fetch --render https://jobs.example.com/search?q=golang&loc=beijing
+  提取所有职位的公司名称、职位名称、薪资范围和发布日期，
+  按薪资从高到低排序输出
+```
+
+---
 
 ### API 调用
 
-OpenClaw 支持直接调用外部 API，这让它的能力边界大大扩展。
+OpenClaw 支持直接调用外部 API，这让它的能力边界大大扩展。通过配置 API 连接，你可以让 OpenClaw 与几乎任何外部服务对话。
 
-#### 配置 API 连接
+#### 配置 Schema 参考
 
-在 Workspace 配置中添加 API 设置：
+在工作空间配置文件 `openclaw.yaml` 中添加 API 设置：
 
 ```yaml
 apis:
+  # API 名称（自定义，用于对话中引用）
   weather:
     base_url: "https://api.weather.com/v1"
     auth:
       type: bearer
       token: "${WEATHER_API_KEY}"
+    headers:
+      Content-Type: "application/json"
+    timeout: 10000          # 请求超时（毫秒）
+    retry:
+      max_attempts: 3       # 最大重试次数
+      backoff: exponential  # 退避策略：exponential | linear | fixed
+    rate_limit:
+      max_requests: 100     # 每分钟最大请求数
+      window: 60            # 窗口期（秒）
+```
+
+#### 认证方式
+
+OpenClaw 支持多种认证方式，覆盖主流 API 的需求：
+
+**Bearer Token**——最常见的方式，适用于大多数 REST API：
+
+```yaml
+apis:
   github:
     base_url: "https://api.github.com"
     auth:
-      type: token
+      type: bearer
       token: "${GITHUB_TOKEN}"
 ```
 
-#### 使用 API
+**API Key**——通过请求头或查询参数传递密钥：
 
-配置完成后，你可以在对话中自然地调用这些 API：
-
-```bash
-> 查一下北京今天的天气情况
-
-> 获取我的 GitHub 仓库列表，按星标数排序
+```yaml
+apis:
+  openweather:
+    base_url: "https://api.openweathermap.org/data/2.5"
+    auth:
+      type: api_key
+      key: "${OPENWEATHER_KEY}"
+      in: query              # query（查询参数）或 header（请求头）
+      param_name: "appid"    # 参数名称
 ```
 
-OpenClaw 会自动选择合适的 API 端点，构造请求参数，解析返回结果。
+**OAuth 2.0**——适用于需要用户授权的服务：
+
+```yaml
+apis:
+  google_calendar:
+    base_url: "https://www.googleapis.com/calendar/v3"
+    auth:
+      type: oauth2
+      client_id: "${GOOGLE_CLIENT_ID}"
+      client_secret: "${GOOGLE_CLIENT_SECRET}"
+      token_url: "https://oauth2.googleapis.com/token"
+      scopes:
+        - "https://www.googleapis.com/auth/calendar.readonly"
+```
+
+**自定义请求头**——用于不遵循标准规范的 API：
+
+```yaml
+apis:
+  custom_service:
+    base_url: "https://api.custom.com"
+    auth:
+      type: custom
+      headers:
+        X-API-Key: "${CUSTOM_API_KEY}"
+        X-App-Id: "${CUSTOM_APP_ID}"
+```
+
+#### 常见 API 集成示例
+
+以下是几个高频使用场景的完整配置：
+
+**GitHub——代码仓库管理**
+
+```yaml
+apis:
+  github:
+    base_url: "https://api.github.com"
+    auth:
+      type: bearer
+      token: "${GITHUB_TOKEN}"
+    headers:
+      Accept: "application/vnd.github.v3+json"
+```
+
+配置完成后的对话示例：
+
+```bash
+> 获取我的 GitHub 仓库列表，按星标数排序
+
+> 查看 openclaw/core 仓库最近一周的 Issue，按优先级分类
+
+> 给 openclaw/core#142 这个 Issue 添加评论："已在 v2.1 中修复"
+```
+
+**Slack——团队通知**
+
+```yaml
+apis:
+  slack:
+    base_url: "https://slack.com/api"
+    auth:
+      type: bearer
+      token: "${SLACK_BOT_TOKEN}"
+```
+
+```bash
+> 向 #dev-alerts 频道发送消息："部署完成，v2.3.1 已上线"
+
+> 查看 #general 频道最近 10 条消息
+```
+
+**Notion——知识库管理**
+
+```yaml
+apis:
+  notion:
+    base_url: "https://api.notion.com/v1"
+    auth:
+      type: bearer
+      token: "${NOTION_TOKEN}"
+    headers:
+      Notion-Version: "2022-06-28"
+```
+
+```bash
+> 在 Notion 的"技术文档"数据库中创建一个新页面，
+  标题为"API 设计规范 v2"，内容从 ./docs/api-spec.md 读取
+
+> 查询 Notion 中"任务看板"里所有状态为"进行中"的任务
+```
+
+**企业微信——消息推送**
+
+```yaml
+apis:
+  wecom:
+    base_url: "https://qyapi.weixin.qq.com/cgi-bin"
+    auth:
+      type: custom
+      headers: {}
+    params:
+      corpid: "${WECOM_CORP_ID}"
+      corpsecret: "${WECOM_SECRET}"
+```
+
+```bash
+> 通过企业微信向"研发部"群发送消息：
+  "提醒：明天下午 2 点 Sprint 评审会，请提前准备演示材料"
+```
+
+#### 请求与响应处理
+
+OpenClaw 会自动处理 API 调用中的常见问题：
+
+- **自动序列化**：将你的自然语言指令转换为正确的请求参数
+- **响应解析**：将 JSON/XML 响应转换为可读的自然语言回答
+- **分页遍历**：当 API 结果分页时，自动请求后续页面并合并结果
+
+你也可以指定原始请求模式，精确控制请求内容：
+
+```bash
+> /api github POST /repos/myorg/myrepo/issues
+  body: {"title": "自动创建的 Issue", "body": "由 OpenClaw 自动生成", "labels": ["bug"]}
+```
+
+#### 错误处理
+
+当 API 调用失败时，OpenClaw 会提供清晰的错误诊断：
+
+- **401/403 错误**：提示检查认证配置和权限范围
+- **404 错误**：提示确认 API 端点路径是否正确
+- **429 错误**：自动等待并重试，遵循 API 返回的 Retry-After 头
+- **500 错误**：提示服务端问题，建议稍后重试
+- **超时错误**：提示检查网络连接或增加超时设置
+
+```bash
+# 查看 API 调用的详细日志
+> /api-log --last 5
+```
+
+---
+
+### Webhook 接收
+
+除了主动调用外部 API，OpenClaw 还支持接收外部事件——通过 Webhook，外部系统可以主动触发 OpenClaw 执行任务。
+
+#### 基本配置
+
+在工作空间配置中定义 Webhook 端点：
+
+```yaml
+webhooks:
+  github_push:
+    path: "/hooks/github-push"
+    secret: "${WEBHOOK_SECRET}"
+    trigger:
+      action: "运行代码审查并将结果发送到 Slack #code-review 频道"
+
+  slack_mention:
+    path: "/hooks/slack-mention"
+    secret: "${SLACK_SIGNING_SECRET}"
+    trigger:
+      action: "解析消息内容，如果是技术问题则搜索答案并回复"
+```
+
+#### 启动 Webhook 监听
+
+```bash
+# 启动 Webhook 服务
+openclaw webhook start --port 8080
+
+# 查看已注册的 Webhook
+openclaw webhook list
+
+# 查看 Webhook 调用日志
+openclaw webhook logs --last 20
+```
+
+#### 典型场景
+
+**GitHub Push 自动审查**：每次代码推送后，OpenClaw 自动运行代码审查并将结果推送到 Slack。
+
+**Slack 消息自动回复**：当有人在 Slack 中 @OpenClaw 提问，自动搜索答案并回复。
+
+**定时任务触发**：配合 cron 或外部调度器，定时触发 OpenClaw 执行信息收集、报告生成等任务。
+
+---
 
 ### 实战案例：信息聚合助手
 
-让我们用今天学到的知识做一个实际应用——创建一个每日技术信息聚合：
+让我们用今天学到的知识做一个实际应用——创建一个每日技术信息聚合助手。
+
+#### 第一步：配置 API 连接
+
+在 `openclaw.yaml` 中添加所需的 API 配置：
+
+```yaml
+apis:
+  github:
+    base_url: "https://api.github.com"
+    auth:
+      type: bearer
+      token: "${GITHUB_TOKEN}"
+    headers:
+      Accept: "application/vnd.github.v3+json"
+  slack:
+    base_url: "https://slack.com/api"
+    auth:
+      type: bearer
+      token: "${SLACK_BOT_TOKEN}"
+```
+
+#### 第二步：创建聚合指令
 
 ```bash
 > 请帮我完成以下任务：
   1. 搜索今天 Hacker News 的热门话题 Top 5
   2. 搜索今天 GitHub Trending 的热门 Python 项目 Top 3
-  3. 查询 OpenClaw 的 GitHub 仓库最新的 3 个 Issue
-  4. 将以上信息整合成一份简洁的日报，保存为 ./daily-tech-report.md
+  3. 查询 openclaw/core 仓库最新的 3 个 Issue
+  4. 搜索 "AI coding assistant" 最近一周的重要新闻
+  5. 将以上信息整合成一份简洁的日报，保存为 ./daily-tech-report.md
+  6. 将日报摘要发送到 Slack 的 #tech-daily 频道
 ```
 
-这个例子展示了联网搜索和文件操作的组合使用，仅需一条指令就能完成平时需要花费 30 分钟的信息收集工作。
+#### 第三步：预期输出
+
+OpenClaw 会生成类似以下内容的日报文件：
+
+```markdown
+# 每日技术简报 - 2026-02-28
+
+## Hacker News 热门话题
+
+1. **Show HN: 开源 AI 代码审查工具** - 讨论 AI 辅助代码审查的准确率突破
+   来源: https://news.ycombinator.com/item?id=xxxxx
+2. **Rust 2026 Edition 发布** - 新版本引入的核心语言特性概览
+   来源: https://news.ycombinator.com/item?id=xxxxx
+3. ...
+
+## GitHub Trending (Python)
+
+| 项目 | Star 数 | 简介 |
+|------|---------|------|
+| example/project-a | 2,340 | 基于 LLM 的自动化测试框架 |
+| example/project-b | 1,856 | 轻量级向量数据库 |
+| example/project-c | 1,203 | Python 异步任务调度库 |
+
+## OpenClaw Core 最新 Issue
+
+- #287: 深度搜索在特定网络环境下超时 (bug)
+- #285: 支持 GraphQL API 调用 (feature request)
+- #283: 文档中文翻译需要更新 (documentation)
+
+## AI 编程助手行业动态
+
+- XX 公司发布了新一代 AI 编程助手，支持多文件上下文理解...
+- 某研究团队发表论文，提出 AI 代码生成准确率新基准...
+
+---
+*由 OpenClaw 自动生成*
+```
+
+这个例子展示了联网搜索、API 调用和文件操作的组合使用，仅需一条指令就能完成平时需要花费 30 分钟以上的信息收集工作。
+
+---
+
+### 实战案例：价格监控
+
+再来看一个更实用的案例——搭建一个产品价格监控工具。
+
+#### 需求描述
+
+监控若干个商品页面的价格，当价格低于目标值时通过企业微信或 Slack 发送通知。
+
+#### 配置文件
+
+```yaml
+# openclaw.yaml
+apis:
+  slack:
+    base_url: "https://slack.com/api"
+    auth:
+      type: bearer
+      token: "${SLACK_BOT_TOKEN}"
+
+price_monitor:
+  targets:
+    - name: "MacBook Pro 16 M4"
+      url: "https://store.example.com/macbook-pro-16"
+      selector: ".product-price"
+      threshold: 18000
+    - name: "Sony WH-1000XM6"
+      url: "https://store.example.com/sony-xm6"
+      selector: ".price-current"
+      threshold: 2200
+  check_interval: 3600   # 检查间隔（秒）
+  notify_channel: "#deals-alert"
+```
+
+#### 执行监控
+
+```bash
+> 根据 openclaw.yaml 中的 price_monitor 配置，
+  抓取每个目标商品的当前价格，
+  如果价格低于阈值，向 Slack #deals-alert 频道发送降价通知，
+  同时将所有价格记录追加到 ./data/price-history.csv
+```
+
+#### 预期输出
+
+终端提示：
+
+```
+[价格监控] MacBook Pro 16 M4: 当前价格 ¥17,599 < 阈值 ¥18,000 -> 已发送降价通知
+[价格监控] Sony WH-1000XM6: 当前价格 ¥2,399 > 阈值 ¥2,200 -> 未触发通知
+[价格监控] 价格记录已追加到 ./data/price-history.csv
+```
+
+你可以将这条指令配合系统的 cron 定时任务或 Webhook 触发器，实现全自动的价格监控。
+
+---
 
 ### 安全注意事项
 
-使用联网功能时，请注意以下安全事项：
+使用联网功能时，安全问题不可忽视。以下是你必须了解的最佳实践。
 
-- **API 密钥管理**：将敏感信息存储在环境变量中，不要硬编码
-- **请求频率**：注意 API 的调用频率限制，避免被封禁
-- **数据隐私**：不要在搜索中包含敏感的个人或公司信息
-- **结果验证**：联网获取的信息不一定完全准确，重要决策前请人工验证
+#### API 密钥管理
+
+**绝对不要**将密钥直接写在配置文件中。始终使用环境变量：
+
+```yaml
+# 正确做法
+auth:
+  token: "${GITHUB_TOKEN}"
+
+# 错误做法 - 千万不要这样
+auth:
+  token: "ghp_xxxxxxxxxxxxxxxxxxxx"
+```
+
+推荐的密钥管理方式：
+
+1. 将密钥存储在 `.env` 文件中，并确保 `.env` 已加入 `.gitignore`
+2. 在团队协作中使用密钥管理服务（如 HashiCorp Vault、AWS Secrets Manager）
+3. 定期轮换密钥，特别是在团队成员离职时
+
+```bash
+# 检查是否有密钥意外提交到 Git
+> /search --local "ghp_|sk-|Bearer " --include "*.yaml,*.yml,*.json"
+```
+
+#### 请求频率控制
+
+不同 API 有不同的频率限制，违反频率限制可能导致账号被封禁：
+
+```yaml
+# 在 API 配置中明确设置频率限制
+rate_limit:
+  max_requests: 60
+  window: 60
+```
+
+建议为每个 API 都配置 `rate_limit`，即使你认为不会触发——自动化任务的请求量往往超出预期。
+
+#### 数据隐私
+
+- 不要在搜索查询中包含敏感的个人信息、密码或内部系统地址
+- 抓取网页时注意目标网站的 robots.txt 和使用条款
+- API 调用涉及的用户数据应遵循相关数据保护法规
+
+#### 请求日志
+
+OpenClaw 会记录所有联网请求的日志，方便你审计和排查问题：
+
+```bash
+# 查看最近的联网请求日志
+openclaw log --network --last 20
+
+# 导出日志用于审计
+openclaw log --network --since 2026-02-01 --export ./logs/network-audit.csv
+```
+
+日志中包含请求时间、目标 URL、请求方法、响应状态码和耗时，但**不会**记录请求体中的敏感数据（如认证令牌）。
+
+---
+
+### 动手练习
+
+以下三个练习帮助你巩固今天学到的内容，建议在自己的工作空间中实际操作。
+
+#### 练习 1：搜索与总结
+
+使用深度搜索模式，调研一个你感兴趣的技术话题（例如："WebAssembly 在服务端的应用前景"），要求：
+
+1. 使用 `/search --deep` 进行搜索
+2. 让 OpenClaw 生成一份至少包含 3 个来源引用的调研摘要
+3. 将结果保存为 Markdown 文件
+
+#### 练习 2：API 集成
+
+选择一个你常用的服务（GitHub、Notion 或其他），完成以下步骤：
+
+1. 在 `openclaw.yaml` 中配置 API 连接
+2. 通过对话测试至少 3 个不同的 API 操作（如：列表查询、创建资源、更新状态）
+3. 验证错误处理——故意使用错误的 Token，观察 OpenClaw 的错误提示
+
+#### 练习 3：信息聚合自动化
+
+搭建一个属于你自己的信息聚合流程：
+
+1. 选择 3-5 个你每天需要关注的信息来源
+2. 编写一条聚合指令，让 OpenClaw 一次性收集所有信息
+3. 将结果保存为日报文件，并尝试配置 Slack 或企业微信推送
+
+---
 
 ### 今日小结
 
 今天你解锁了 OpenClaw 的联网能力，学到了：
 
-1. 如何使用搜索功能获取实时信息
-2. 如何配置和调用外部 API
-3. 如何组合多种能力完成复杂任务
+1. 如何使用三种搜索模式（基础、深度、学术）获取实时信息，并通过操作符精确控制搜索行为
+2. 如何抓取和解析网页内容，包括动态页面和分页处理
+3. 如何配置和调用外部 API，掌握多种认证方式和错误处理策略
+4. 如何通过 Webhook 接收外部事件，实现双向联动
+5. 如何组合搜索、抓取和 API 调用，构建信息聚合和价格监控等实用工具
+6. 联网操作中的安全最佳实践
+
+联网能力让 OpenClaw 从一个封闭的对话工具，变成了能够与整个互联网和外部系统协作的智能助手。这是从「聊天」到「做事」的关键一步。
 
 > 💡 **想学更多？** 自动化爬虫实战 → 精品课 Module 4

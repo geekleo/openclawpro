@@ -11,80 +11,350 @@ hook: "企业级自动化工作流 → 精品课 Module 6"
 
 到今天为止，你已经学会了 OpenClaw 的大部分核心功能。但之前的操作都需要手动触发——你发一条指令，AI 执行一次任务。今天，我们将学习如何让 OpenClaw 自动运行，像一个 7x24 小时在岗的智能员工。
 
+先来算一笔时间账。假设你每天手动执行以下任务：
+
+| 任务 | 手动操作耗时 | 频率 |
+|------|-------------|------|
+| 生成日报并发送 | 15 分钟 | 每天 |
+| 检查服务器状态 | 5 分钟 | 每天 3 次 |
+| 整理周报 | 30 分钟 | 每周 |
+| 数据备份确认 | 10 分钟 | 每天 |
+| 监控竞品动态 | 20 分钟 | 每天 |
+
+**手动模式**：每周至少花费 6 小时在这些重复性工作上。
+**自动化模式**：一次配置，此后每周节省 6 小时，一年节省超过 300 小时。
+
+这就是自动化的价值。今天你将学会两个核心工具——Cron 定时任务和 Heartbeat 心跳监控，以及围绕它们构建的完整自动化体系。
+
+---
+
 ### Cron 定时任务
 
 OpenClaw 内置了强大的定时任务系统，语法与 Linux Cron 完全兼容，但使用起来更加友好。
 
+#### Cron 表达式语法
+
+在创建定时任务之前，先了解 Cron 表达式的结构。一个标准的 Cron 表达式由 5 个字段组成：
+
+```
+┌───────────── 分钟 (0 - 59)
+│ ┌───────────── 小时 (0 - 23)
+│ │ ┌───────────── 日期 (1 - 31)
+│ │ │ ┌───────────── 月份 (1 - 12)
+│ │ │ │ ┌───────────── 星期 (0 - 7, 0 和 7 都表示周日)
+│ │ │ │ │
+* * * * *
+```
+
+常用特殊符号：
+
+| 符号 | 含义 | 示例 |
+|------|------|------|
+| `*` | 任意值 | `* * * * *` 每分钟执行 |
+| `,` | 多个值 | `0,30 * * * *` 每小时的 0 分和 30 分 |
+| `-` | 范围 | `0 9-17 * * *` 每天 9 点到 17 点整点 |
+| `/` | 步长 | `*/15 * * * *` 每 15 分钟 |
+| `1-5` | 工作日 | `0 9 * * 1-5` 工作日早上 9 点 |
+
 #### 创建定时任务
 
 ```bash
-# 交互式创建
+# 交互式创建（推荐新手使用）
 openclaw cron create
 
 # 命令行直接创建
 openclaw cron add --name "daily-report" \
   --schedule "0 9 * * *" \
   --task "生成今日工作日报并发送到企业微信群"
+
+# 从配置文件批量创建
+openclaw cron apply -f cron-jobs.yaml
 ```
 
-#### 常用调度示例
+交互式创建过程中，OpenClaw 会引导你逐步填写：
+
+```
+? 任务名称: daily-report
+? 选择调度方式:
+  > 每天执行
+    每周执行
+    每月执行
+    自定义 Cron 表达式
+? 执行时间: 09:00
+? 任务描述: 生成今日工作日报并发送到企业微信群
+? 是否设置超时时间？(默认 5 分钟): 10m
+? 任务失败时是否重试？: 是，最多重试 3 次
+
+已创建定时任务 "daily-report"
+下次执行时间：明天 09:00
+```
+
+#### 常用调度模式速查
+
+```bash
+# 每 N 分钟
+*/5 * * * *       # 每 5 分钟
+*/15 * * * *      # 每 15 分钟
+*/30 * * * *      # 每 30 分钟
+
+# 每小时
+0 * * * *         # 每小时整点
+30 * * * *        # 每小时的第 30 分钟
+
+# 每天
+0 9 * * *         # 每天上午 9 点
+0 0 * * *         # 每天午夜
+0 9,18 * * *      # 每天上午 9 点和下午 6 点
+
+# 每周
+0 9 * * 1         # 每周一上午 9 点
+0 17 * * 5        # 每周五下午 5 点
+
+# 每月
+0 10 1 * *        # 每月 1 号上午 10 点
+0 10 1,15 * *     # 每月 1 号和 15 号上午 10 点
+
+# 仅工作日（周一到周五）
+0 9 * * 1-5       # 工作日上午 9 点
+0 9-18 * * 1-5    # 工作日每小时（9 点到 18 点）
+```
+
+---
+
+### 常用调度示例
+
+下面是 6 个覆盖不同真实场景的完整示例：
 
 ```yaml
 cron_jobs:
-  # 每天早上 9 点生成日报
+  # 1. 每天早上 9 点生成日报
   daily_report:
     schedule: "0 9 * * *"
+    timeout: 10m
     task: |
       1. 从 Jira 获取昨日完成的任务列表
       2. 从 Git 获取昨日代码提交记录
       3. 汇总生成工作日报
       4. 发送到企业微信 #team-daily 频道
+    on_failure:
+      retry: 2
+      notify: "team-lead@company.com"
 
-  # 每周五下午 5 点生成周报
+  # 2. 每周五下午 5 点生成周报
   weekly_summary:
     schedule: "0 17 * * 5"
+    timeout: 15m
     task: |
       1. 汇总本周所有日报数据
       2. 分析本周关键指标变化
-      3. 生成周报并保存为 PDF
-      4. 邮件发送给项目经理
+      3. 对比上周数据生成趋势图
+      4. 生成周报并保存为 PDF
+      5. 邮件发送给项目经理
+    on_failure:
+      retry: 1
+      notify: "pm@company.com"
 
-  # 每隔 2 小时检查服务器状态
+  # 3. 每隔 2 小时检查服务器健康状态
   health_check:
     schedule: "0 */2 * * *"
+    timeout: 3m
     task: |
       1. 检查所有服务端口响应状态
       2. 检查 CPU、内存、磁盘使用率
-      3. 如有异常立即发送告警通知
+      3. 检查数据库连接池状态
+      4. 如有异常立即发送告警通知
+    on_failure:
+      retry: 3
+      notify: "ops-team@company.com"
+      escalate_after: 2
+
+  # 4. 每天凌晨 2 点执行数据备份
+  data_backup:
+    schedule: "0 2 * * *"
+    timeout: 30m
+    task: |
+      1. 导出 PostgreSQL 数据库完整备份
+      2. 压缩备份文件
+      3. 上传至 S3 备份桶
+      4. 清理 30 天前的旧备份
+      5. 验证备份文件完整性
+      6. 发送备份完成报告
+    on_failure:
+      retry: 2
+      notify: "dba@company.com"
+      priority: critical
+
+  # 5. 工作日上午 10 点定时发布内容
+  content_publish:
+    schedule: "0 10 * * 1-5"
+    timeout: 5m
+    task: |
+      1. 从内容队列中获取待发布文章
+      2. 检查文章状态是否为"审核通过"
+      3. 按平台要求调整格式
+      4. 发布到微信公众号、知乎、掘金
+      5. 记录发布结果
+    on_failure:
+      retry: 1
+      notify: "content-team@company.com"
+
+  # 6. 每小时监控 RSS 订阅源
+  rss_monitor:
+    schedule: "0 * * * *"
+    timeout: 5m
+    task: |
+      1. 拉取所有已订阅 RSS 源的最新条目
+      2. 与上次检查结果对比，筛选新内容
+      3. 对新内容进行摘要提取和分类
+      4. 将符合关注关键词的条目推送到 Slack #news 频道
+    on_failure:
+      retry: 2
 ```
+
+管理已创建的定时任务：
+
+```bash
+# 查看所有定时任务
+openclaw cron list
+
+# 查看任务详情
+openclaw cron info daily-report
+
+# 暂停某个任务
+openclaw cron pause daily-report
+
+# 恢复暂停的任务
+openclaw cron resume daily-report
+
+# 删除任务
+openclaw cron remove daily-report
+```
+
+---
 
 ### Heartbeat 心跳监控
 
 Heartbeat 是 OpenClaw 的智能监控系统。它不仅可以监控服务状态，还能在检测到异常时自动执行预设的修复方案。
 
-#### 配置心跳监控
+#### 监控类型
+
+OpenClaw 支持四种监控类型，覆盖绝大多数运维场景：
+
+**HTTP 监控** —— 检测网站和 API 的可用性与响应时间：
 
 ```yaml
 heartbeat:
-  # 网站可用性监控
   website_monitor:
+    type: http
     url: "https://your-app.com"
-    interval: 60  # 每 60 秒检查一次
-    timeout: 10   # 超时时间 10 秒
-    on_failure:
-      - action: notify
-        channel: "slack:#alerts"
-        message: "网站无法访问！"
-      - action: restart
-        service: "web-server"
-      - action: escalate
-        after: 3  # 连续 3 次失败后升级
-        notify: "oncall@company.com"
+    method: GET
+    interval: 60
+    timeout: 10
+    expected_status: 200
+    expected_body_contains: "OK"
+```
 
-  # API 响应时间监控
-  api_performance:
+**TCP 监控** —— 检测端口是否可达，适用于数据库、缓存等服务：
+
+```yaml
+heartbeat:
+  database_monitor:
+    type: tcp
+    host: "db.your-app.com"
+    port: 5432
+    interval: 30
+    timeout: 5
+```
+
+**进程监控** —— 检测系统进程是否在运行：
+
+```yaml
+heartbeat:
+  worker_monitor:
+    type: process
+    name: "celery-worker"
+    min_count: 2
+    interval: 60
+```
+
+**自定义监控** —— 执行自定义脚本或命令进行检测：
+
+```yaml
+heartbeat:
+  disk_monitor:
+    type: custom
+    command: "df -h / | awk 'NR==2 {print $5}' | tr -d '%'"
+    threshold: 85
+    operator: "<"
+    interval: 300
+    message: "磁盘使用率超过 85%"
+```
+
+#### 告警通道
+
+监控发现异常后，需要及时通知相关人员。OpenClaw 支持多种告警通道：
+
+```yaml
+alert_channels:
+  # Slack 通知
+  slack:
+    webhook: "https://hooks.slack.com/services/xxx/yyy/zzz"
+    channel: "#alerts"
+    mention: "@oncall"
+
+  # 企业微信通知
+  wechat_work:
+    webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+    mentioned_list: ["zhangsan", "lisi"]
+
+  # 邮件通知
+  email:
+    smtp_host: "smtp.company.com"
+    recipients:
+      - "ops-team@company.com"
+      - "team-lead@company.com"
+
+  # 通用 Webhook
+  webhook:
+    url: "https://your-alerting-system.com/api/alert"
+    method: POST
+    headers:
+      Authorization: "Bearer your-token"
+```
+
+#### 升级策略与 SLA 追踪
+
+对于关键服务，你可以配置多级升级策略，确保问题不会被遗漏：
+
+```yaml
+heartbeat:
+  production_api:
     url: "https://api.your-app.com/health"
     interval: 30
+    timeout: 10
+    sla_target: 99.9  # SLA 目标：99.9% 可用率
+
+    escalation:
+      # 第一级：立即通知值班人员
+      - level: 1
+        after_failures: 1
+        channels: ["slack", "wechat_work"]
+        message: "API 响应异常，请关注"
+
+      # 第二级：3 次失败后通知技术负责人
+      - level: 2
+        after_failures: 3
+        channels: ["slack", "email"]
+        message: "API 持续故障，需要立即处理"
+        notify: "tech-lead@company.com"
+
+      # 第三级：10 次失败后通知 CTO
+      - level: 3
+        after_failures: 10
+        channels: ["slack", "email", "webhook"]
+        message: "严重故障：API 持续不可用"
+        notify: "cto@company.com"
+
     thresholds:
       response_time: 2000  # 响应时间超过 2 秒告警
       error_rate: 5        # 错误率超过 5% 告警
@@ -104,11 +374,79 @@ openclaw heartbeat history --last 24h
 
 # 暂停特定监控
 openclaw heartbeat pause website_monitor
+
+# 恢复监控
+openclaw heartbeat resume website_monitor
 ```
+
+---
+
+### 监控面板
+
+OpenClaw 提供了内置的监控面板，帮助你直观了解所有服务的运行状况。
+
+#### 查看面板
+
+```bash
+# 在终端中打开实时监控面板
+openclaw heartbeat dashboard
+
+# 在浏览器中打开可视化面板
+openclaw heartbeat dashboard --web
+
+# 只查看异常状态的监控项
+openclaw heartbeat dashboard --filter unhealthy
+```
+
+终端面板会实时刷新，展示每个监控项的状态、响应时间、最近一次检查时间等信息：
+
+```
+OpenClaw Heartbeat Dashboard              更新时间: 2024-01-15 14:30:22
+-----------------------------------------------------------------------
+状态   名称                 响应时间    最近检查      可用率
+-----------------------------------------------------------------------
+[OK]   website_monitor      120ms      30s ago       99.97%
+[OK]   database_monitor     8ms        15s ago       100.00%
+[WARN] api_performance      1850ms     30s ago       99.21%
+[FAIL] worker_monitor       --         60s ago       95.50%
+-----------------------------------------------------------------------
+总计: 4 个监控项 | 正常: 2 | 警告: 1 | 故障: 1
+```
+
+#### 状态页面生成
+
+为团队或客户生成公开的服务状态页面：
+
+```bash
+# 生成静态状态页面
+openclaw heartbeat status-page --output ./public/status.html
+
+# 启动状态页面服务
+openclaw heartbeat status-page --serve --port 8080
+```
+
+#### 历史数据分析
+
+查询历史监控数据，分析服务表现趋势：
+
+```bash
+# 查看过去 7 天的可用率统计
+openclaw heartbeat report --period 7d
+
+# 导出月度 SLA 报告
+openclaw heartbeat report --period 30d --format pdf --output sla-report.pdf
+
+# 查看特定时间段的故障记录
+openclaw heartbeat incidents --from "2024-01-01" --to "2024-01-31"
+```
+
+---
 
 ### 自动化工作流编排
 
-将 Cron 和 Heartbeat 结合起来，可以构建复杂的自动化工作流：
+将 Cron 和 Heartbeat 结合起来，可以构建复杂的自动化工作流。OpenClaw 提供了一套工作流 DSL（领域特定语言），用于定义多步骤的自动化任务。
+
+#### 基本工作流结构
 
 ```yaml
 workflows:
@@ -132,27 +470,458 @@ workflows:
       notify: "content-team@company.com"
 ```
 
-### 任务日志与调试
+#### 步骤依赖与并行执行
 
-自动化任务的调试和监控同样重要：
+当多个步骤之间没有依赖关系时，OpenClaw 会自动并行执行以提高效率：
+
+```yaml
+workflows:
+  morning_briefing:
+    trigger:
+      type: cron
+      schedule: "0 8 * * 1-5"
+    steps:
+      # 以下三个步骤互不依赖，将并行执行
+      - name: "行业新闻"
+        task: "搜索 AI 行业最新新闻 Top 5"
+      - name: "竞品动态"
+        task: "检查主要竞品的产品更新"
+      - name: "团队数据"
+        task: "获取昨日团队 KPI 数据"
+      # 这个步骤依赖以上三个步骤全部完成
+      - name: "生成简报"
+        task: "将以上信息汇总为一份晨间简报"
+        depends_on:
+          - "行业新闻"
+          - "竞品动态"
+          - "团队数据"
+      - name: "发送简报"
+        task: "将简报发送到 Slack #morning-brief 频道"
+        depends_on: "生成简报"
+```
+
+#### 条件执行
+
+根据前一步骤的结果决定后续流程：
+
+```yaml
+workflows:
+  deployment_pipeline:
+    trigger:
+      type: cron
+      schedule: "0 22 * * 4"  # 每周四晚上 10 点
+    steps:
+      - name: "运行测试"
+        task: "执行完整的自动化测试套件"
+      - name: "部署上线"
+        task: "将最新代码部署到生产环境"
+        depends_on: "运行测试"
+        condition: "steps.运行测试.status == 'success'"
+      - name: "回滚通知"
+        task: "通知团队测试未通过，本次部署取消"
+        depends_on: "运行测试"
+        condition: "steps.运行测试.status == 'failure'"
+```
+
+#### 错误处理与重试策略
+
+为工作流中的每个步骤配置细粒度的错误处理：
+
+```yaml
+workflows:
+  data_pipeline:
+    trigger:
+      type: cron
+      schedule: "0 3 * * *"
+    retry_policy:
+      max_retries: 3
+      backoff: exponential  # 指数退避：1min, 2min, 4min
+      initial_delay: 60
+    steps:
+      - name: "数据提取"
+        task: "从外部 API 拉取最新数据"
+        retry:
+          max_retries: 5      # 覆盖全局策略
+          backoff: linear     # 线性退避：1min, 2min, 3min
+        timeout: 10m
+      - name: "数据转换"
+        task: "清洗和转换数据格式"
+        depends_on: "数据提取"
+        timeout: 15m
+      - name: "数据加载"
+        task: "将处理后的数据导入数据仓库"
+        depends_on: "数据转换"
+        timeout: 20m
+    on_error:
+      notify: "data-team@company.com"
+      action: "记录失败详情，保存中间数据以便手动恢复"
+```
+
+#### 工作流模板
+
+对于常用的工作流模式，可以定义模板并复用：
 
 ```bash
-# 查看任务执行日志
+# 查看可用的工作流模板
+openclaw workflow templates
+
+# 基于模板创建工作流
+openclaw workflow create --from-template daily-report
+
+# 导出现有工作流为模板
+openclaw workflow export content_pipeline --as-template
+```
+
+---
+
+### 事件驱动自动化
+
+除了定时触发，OpenClaw 还支持基于事件的自动化——当某个条件满足时自动执行任务。
+
+#### 文件变更触发
+
+当指定目录下的文件发生变更时自动执行任务：
+
+```yaml
+workflows:
+  auto_format:
+    trigger:
+      type: file_watch
+      paths:
+        - "./src/**/*.ts"
+        - "./src/**/*.tsx"
+      events: [create, modify]
+    steps:
+      - name: "格式化代码"
+        task: "对变更的文件执行代码格式化"
+      - name: "静态检查"
+        task: "运行 ESLint 检查代码质量"
+        depends_on: "格式化代码"
+```
+
+#### Webhook 触发
+
+通过 HTTP 请求触发工作流，方便与外部系统集成：
+
+```yaml
+workflows:
+  deploy_on_merge:
+    trigger:
+      type: webhook
+      path: "/hooks/deploy"
+      secret: "${WEBHOOK_SECRET}"
+      filter:
+        body.action: "closed"
+        body.pull_request.merged: true
+    steps:
+      - name: "部署"
+        task: "拉取最新代码并部署到生产环境"
+      - name: "通知"
+        task: "在 Slack 中通知团队部署完成"
+        depends_on: "部署"
+```
+
+```bash
+# 启动 Webhook 监听服务
+openclaw webhook serve --port 9090
+
+# 查看已注册的 Webhook 端点
+openclaw webhook list
+```
+
+#### 邮件触发
+
+当收到符合条件的邮件时自动执行任务：
+
+```yaml
+workflows:
+  support_ticket:
+    trigger:
+      type: email
+      mailbox: "support@company.com"
+      filter:
+        subject_contains: "紧急"
+    steps:
+      - name: "分析问题"
+        task: "分析邮件内容，识别问题类型和紧急程度"
+      - name: "创建工单"
+        task: "在项目管理系统中创建对应的工单"
+        depends_on: "分析问题"
+      - name: "自动回复"
+        task: "向发件人发送确认回复，告知工单编号"
+        depends_on: "创建工单"
+```
+
+#### Git 事件触发
+
+监听 Git 仓库事件，实现 CI/CD 自动化：
+
+```yaml
+workflows:
+  code_review:
+    trigger:
+      type: git
+      repo: "./my-project"
+      events: [push, pull_request]
+      branches: ["main", "develop"]
+    steps:
+      - name: "代码审查"
+        task: "使用 code-reviewer 技能审查本次变更"
+      - name: "安全扫描"
+        task: "检查是否引入了安全漏洞或敏感信息泄露"
+        depends_on: "代码审查"
+      - name: "提交评审意见"
+        task: "将审查结果作为评论提交到 Pull Request"
+        depends_on: "安全扫描"
+```
+
+---
+
+### 任务日志与调试
+
+自动化任务的调试和监控同样重要。当任务在凌晨 3 点静默失败时，日志就是你的救命稻草。
+
+#### 查看日志
+
+```bash
+# 查看最近的任务执行日志
 openclaw cron logs daily-report --tail 50
 
-# 手动触发一次任务（用于测试）
+# 实时跟踪日志输出
+openclaw cron logs daily-report --follow
+
+# 按时间范围筛选日志
+openclaw cron logs daily-report --since "2024-01-15 09:00" --until "2024-01-15 10:00"
+
+# 只看错误日志
+openclaw cron logs daily-report --level error
+```
+
+#### 日志级别
+
+OpenClaw 使用四个日志级别，便于快速定位问题：
+
+| 级别 | 用途 | 示例 |
+|------|------|------|
+| `debug` | 详细执行过程 | 正在请求 Jira API... |
+| `info` | 正常执行记录 | 日报生成完成，共 15 条记录 |
+| `warn` | 潜在风险提示 | API 响应时间超过 3 秒 |
+| `error` | 执行失败 | 发送企业微信失败：401 Unauthorized |
+
+```bash
+# 设置任务的日志级别
+openclaw cron update daily-report --log-level debug
+```
+
+#### 日志轮转
+
+为防止日志文件无限增长，建议配置日志轮转策略：
+
+```yaml
+logging:
+  level: info
+  rotation:
+    max_size: 50MB        # 单个日志文件最大 50MB
+    max_files: 10         # 最多保留 10 个日志文件
+    compress: true        # 旧日志自动压缩
+  output:
+    - console
+    - file: "./logs/cron.log"
+```
+
+#### Dry-run 模式
+
+在正式启用定时任务之前，使用 dry-run 模式验证任务能否正确执行：
+
+```bash
+# 模拟执行，不产生实际效果
 openclaw cron trigger daily-report --dry-run
+
+# 模拟执行并显示详细过程
+openclaw cron trigger daily-report --dry-run --verbose
+```
+
+dry-run 模式会执行任务的完整逻辑，但所有对外操作（发送消息、写入数据库、调用 API）都会被拦截并记录，不会真正执行。
+
+#### 任务历史与重放
+
+```bash
+# 查看任务执行历史
+openclaw cron history daily-report --last 30
+
+# 查看某次执行的详细信息
+openclaw cron history daily-report --run-id abc123
+
+# 重放某次执行（使用当时的输入和上下文）
+openclaw cron replay daily-report --run-id abc123
 
 # 查看任务执行统计
 openclaw cron stats
 ```
 
+统计视图展示任务的整体健康状况：
+
+```
+任务统计: daily-report
+-----------------------------------------
+最近 30 天执行次数:     30
+成功次数:               28
+失败次数:               2
+成功率:                 93.3%
+平均执行时间:           2m 15s
+最长执行时间:           4m 30s
+最短执行时间:           1m 05s
+下次执行时间:           明天 09:00
+```
+
+---
+
+### 生产环境最佳实践
+
+当你的自动化任务越来越多时，需要遵循一些最佳实践来确保系统稳定运行。
+
+#### 资源管理
+
+设置全局资源限制，避免任务互相争抢资源：
+
+```yaml
+global:
+  max_concurrent_tasks: 5    # 同时运行的任务不超过 5 个
+  max_memory_per_task: 512MB # 单个任务最大内存
+  task_queue: fifo           # 超出并发数时排队等待
+```
+
+#### 并发任务控制
+
+避免同一个任务重复运行导致数据混乱：
+
+```yaml
+cron_jobs:
+  data_sync:
+    schedule: "*/10 * * * *"
+    concurrency: skip        # 如果上次还没结束，跳过本次
+    # 其他选项: queue（排队）, replace（终止旧的，启动新的）
+```
+
+#### 失败通知策略
+
+不要让每次失败都发通知，避免告警疲劳：
+
+```yaml
+cron_jobs:
+  health_check:
+    schedule: "*/5 * * * *"
+    notification:
+      on_first_failure: true   # 首次失败时通知
+      on_recovery: true        # 恢复正常时通知
+      suppress_after: 3        # 连续失败超过 3 次后不再重复通知
+      digest_interval: 1h      # 改为每小时发送一次摘要
+```
+
+#### 备份你的自动化配置
+
+自动化配置本身也需要备份：
+
+```bash
+# 导出所有 Cron 任务配置
+openclaw cron export --output cron-backup.yaml
+
+# 导出所有 Heartbeat 监控配置
+openclaw heartbeat export --output heartbeat-backup.yaml
+
+# 导出所有工作流配置
+openclaw workflow export --all --output workflows-backup.yaml
+```
+
+建议将这些配置文件纳入版本控制（Git），这样可以追溯每次变更。
+
+#### 监控你的监控
+
+这听起来像套娃，但非常重要——你需要确保监控系统本身是正常的：
+
+```bash
+# 启用监控系统自检
+openclaw heartbeat self-check --enable
+
+# 设置"死人开关"：如果 10 分钟没收到心跳，发送告警
+openclaw heartbeat deadman --interval 10m --notify "ops-lead@company.com"
+```
+
+---
+
+### 动手练习
+
+以下三个练习帮助你巩固今天学到的内容。
+
+**练习一：创建你的第一个定时任务**
+
+创建一个每天早上 9 点执行的任务，要求：
+- 搜索你所在行业的最新新闻
+- 生成一份不超过 500 字的摘要
+- 输出到指定文件
+
+```bash
+# 参考命令
+openclaw cron add --name "morning-news" \
+  --schedule "0 9 * * *" \
+  --task "搜索 [你的行业] 最新新闻 Top 5，生成 500 字摘要，保存到 ./output/daily-news.md"
+
+# 用 dry-run 验证
+openclaw cron trigger morning-news --dry-run
+```
+
+**练习二：配置服务监控与告警**
+
+为你的一个网站或服务配置心跳监控，要求：
+- 每 60 秒检查一次
+- 响应时间超过 3 秒告警
+- 连续 3 次失败后发送邮件通知
+
+```yaml
+# 创建 heartbeat.yaml 并填入你的配置
+heartbeat:
+  my_service:
+    type: http
+    url: "https://你的服务地址"
+    interval: 60
+    timeout: 5
+    thresholds:
+      response_time: 3000
+    escalation:
+      - level: 1
+        after_failures: 1
+        channels: ["slack"]
+      - level: 2
+        after_failures: 3
+        channels: ["email"]
+```
+
+```bash
+openclaw heartbeat apply -f heartbeat.yaml
+openclaw heartbeat start
+openclaw heartbeat dashboard
+```
+
+**练习三：编排一个完整工作流**
+
+创建一个工作日晨间简报工作流，包含并行采集、汇总和发送三个阶段。尝试使用条件执行，当新闻数量少于 3 条时跳过发送步骤。
+
+提示：参考上文"步骤依赖与并行执行"和"条件执行"部分的示例。
+
+---
+
 ### 今日小结
 
 今天你学会了让 OpenClaw 自动化运行的关键技能：
 
-1. 使用 Cron 设置各种定时任务
-2. 使用 Heartbeat 进行智能监控
-3. 编排复杂的自动化工作流
+1. 使用 **Cron** 设置各种定时任务，掌握 Cron 表达式语法
+2. 使用 **Heartbeat** 进行多层次的智能监控，配置告警与升级策略
+3. 通过**监控面板**直观查看服务状态和历史数据
+4. 编排复杂的**自动化工作流**，包括依赖管理、条件执行和错误处理
+5. 利用**事件驱动**机制实现文件变更、Webhook、邮件、Git 事件触发
+6. 掌握任务**日志与调试**技巧，确保自动化任务稳定运行
+7. 了解**生产环境最佳实践**，为正式上线做好准备
+
+自动化是 AI 助手价值最大化的关键一步。从今天开始，让 OpenClaw 在后台默默为你工作吧。
 
 > 💡 **想深入学习？** 企业级自动化工作流 → 精品课 Module 6

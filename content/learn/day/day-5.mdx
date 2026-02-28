@@ -9,33 +9,216 @@ hook: "自定义 Skill 开发教程 → 精品课 Module 5"
 
 ## 用技能包武装你的 AI 助手
 
-经过前四天的学习，你已经掌握了 OpenClaw 的核心功能。今天我们将进入一个全新的领域——ClawHub 技能生态系统。通过安装社区开发的技能包，你可以让 OpenClaw 获得几乎无限的能力扩展。
+经过前四天的学习，你已经掌握了 OpenClaw 的核心功能——对话、文件操作、联网搜索和 API 调用。今天我们将进入一个全新的领域——ClawHub 技能生态系统。通过安装社区开发的技能包，你可以让 OpenClaw 获得几乎无限的能力扩展。
+
+这就好比你有了一台功能完备的智能手机，但今天我们要打开应用商店，让它真正变成你的专属超级工具。
+
+ClawHub 生态系统自上线以来增长迅猛。以下是一些关键数据：
+
+- **2800+** 个已发布的技能包
+- **12000+** 名注册开发者
+- **月均 350+** 个新技能包上线
+- **480 万+** 次累计安装量
+- **平均评分 4.3/5** 的社区质量评价
+
+这意味着无论你从事什么行业、面对什么任务，大概率已经有人为你开发好了对应的技能包。
 
 ### 什么是 ClawHub？
 
-ClawHub 是 OpenClaw 的官方技能市场，类似于 VS Code 的插件商店或手机的应用商店。在这里，社区开发者分享了各种实用的技能包（Skill），涵盖开发、设计、运维、数据分析、内容创作等多个领域。
+ClawHub 是 OpenClaw 的官方技能市场和开发者社区平台。如果你有其他技术平台的使用经验，以下类比可以帮你快速理解：
 
-截至目前，ClawHub 上已有超过 2000 个活跃技能包，每周还在持续增加。
+| 平台 | 生态系统 | 对应关系 |
+|------|---------|---------|
+| Node.js | npm | npm 包 = OpenClaw 技能包 |
+| VS Code | Extension Marketplace | VS Code 插件 = OpenClaw 技能 |
+| Python | PyPI | Python 库 = OpenClaw 技能模块 |
+| Figma | Community Plugins | Figma 插件 = OpenClaw 设计技能 |
+
+但 ClawHub 与这些平台有一个本质区别：传统包管理器分发的是代码库，而 ClawHub 分发的是**AI 行为能力**。一个技能包不只是工具函数的集合，而是包含了提示词模板、工作流编排、上下文策略和输出规范在内的完整能力单元。
+
+#### 技能分类体系
+
+ClawHub 采用层级分类体系组织技能包，目前设有 8 个一级分类：
+
+- **@devtools/** -- 开发工具类：代码审查、测试生成、调试辅助、重构建议
+- **@content/** -- 内容创作类：博客写作、文案生成、翻译润色、SEO 优化
+- **@ops/** -- 运维部署类：Docker 管理、CI/CD、服务器监控、日志分析
+- **@data/** -- 数据分析类：数据清洗、可视化、统计分析、报表生成
+- **@design/** -- 设计辅助类：原型生成、配色方案、图标建议、UI 审查
+- **@security/** -- 安全审计类：漏洞扫描、依赖检查、合规审查、渗透测试建议
+- **@productivity/** -- 效率提升类：日报周报、会议纪要、任务管理、知识整理
+- **@communication/** -- 沟通协作类：邮件撰写、消息模板、文档协同、客户沟通
+
+每个分类下还有更细粒度的标签（tag），方便精准定位你需要的技能。
+
+#### 社区治理模型
+
+ClawHub 采用开放的社区治理模型来保障生态系统质量：
+
+- **发布审核**：所有新技能包在上线前需通过自动化安全扫描和基础功能检测
+- **社区评审**：上线后由社区用户提交评分和使用反馈
+- **维护者认证**：活跃维护者可申请"认证开发者"标识，获得优先推荐
+- **争议仲裁**：由社区委员会处理技能包命名冲突、许可协议等争议
+
+#### 质量评分系统
+
+每个技能包都有一个综合质量评分，由以下维度加权计算：
+
+- **功能完整性**（30%）：技能是否能稳定完成其描述的功能
+- **文档质量**（20%）：README 和使用说明是否清晰完整
+- **维护活跃度**（20%）：最近更新时间、Issue 响应速度
+- **用户评价**（20%）：社区用户的星级评分和文字反馈
+- **兼容性**（10%）：对不同 OpenClaw 版本的支持情况
+
+质量评分达到 4.0 以上的技能包会获得"推荐"标识，达到 4.5 以上的会获得"精选"标识。
 
 ### 浏览和搜索技能
 
+ClawHub 提供了丰富的浏览和搜索方式，帮你快速找到合适的技能包。
+
+#### 基本浏览
+
 ```bash
-# 打开技能市场
+# 打开技能市场主页（在终端中以交互式列表呈现）
 openclaw hub browse
 
-# 按分类浏览
+# 按一级分类浏览
 openclaw hub browse --category development
+openclaw hub browse --category content
+openclaw hub browse --category security
 
-# 搜索特定技能
+# 按标签浏览
+openclaw hub browse --tag "database"
+openclaw hub browse --tag "react" --tag "frontend"
+```
+
+#### 按热度和时间浏览
+
+```bash
+# 查看本周热门技能（按安装量排序）
+openclaw hub trending --period weekly
+
+# 查看最新发布的技能
+openclaw hub browse --sort recent
+
+# 查看评分最高的技能
+openclaw hub browse --sort rating --min-rating 4.5
+
+# 查看指定分类下载量最高的技能
+openclaw hub browse --category ops --sort downloads
+```
+
+以下是 `openclaw hub trending` 的典型输出：
+
+```
+ClawHub Trending Skills (This Week)
+====================================
+
+  #   Skill                         Downloads   Rating   Updated
+  1   @devtools/code-reviewer       12,430      4.8      2 days ago
+  2   @security/dep-scanner         8,920       4.7      1 day ago
+  3   @content/blog-writer          7,650       4.6      3 days ago
+  4   @data/csv-analyzer            6,200       4.5      5 days ago
+  5   @ops/k8s-pilot                5,870       4.7      1 day ago
+  6   @devtools/test-generator      5,340       4.4      4 days ago
+  7   @productivity/meeting-notes   4,980       4.3      2 days ago
+  8   @design/color-palette         4,210       4.5      6 days ago
+  9   @communication/email-craft    3,890       4.2      3 days ago
+ 10   @data/sql-optimizer           3,560       4.6      1 day ago
+
+Showing 1-10 of 2800+ skills. Use --page 2 to see more.
+```
+
+#### 搜索技能
+
+```bash
+# 关键词搜索
 openclaw hub search "数据库管理"
 
-# 查看技能详情
-openclaw hub info @devtools/sql-assistant
+# 带分类过滤的搜索
+openclaw hub search "docker" --category ops
+
+# 搜索特定作者的技能
+openclaw hub search --author "openclaw-team"
+
+# 模糊搜索（当你不确定精确名称时）
+openclaw hub search "代码审查" --fuzzy
+```
+
+#### 查看技能详情
+
+找到感兴趣的技能后，务必先查看详情再安装：
+
+```bash
+openclaw hub info @devtools/code-reviewer
+```
+
+输出示例：
+
+```
+@devtools/code-reviewer v2.3.1
+================================
+Author:       openclaw-team (Verified)
+License:      MIT
+Downloads:    128,430
+Rating:       4.8 (2,340 reviews)
+Last Updated: 2026-02-26
+Compatibility: OpenClaw >= 1.2.0
+
+Description:
+  智能代码审查助手。自动检测代码质量问题、潜在 bug、
+  安全漏洞和性能瓶颈。支持 TypeScript、Python、Go、
+  Java、Rust 等 15 种编程语言。
+
+Dependencies:
+  - @devtools/ast-parser >= 1.0.0
+
+Tags: code-review, quality, security, linting
+
+README: Use 'openclaw hub readme @devtools/code-reviewer' to view full docs.
+Reviews: Use 'openclaw hub reviews @devtools/code-reviewer' to view community reviews.
+```
+
+#### 查看 README 和社区评价
+
+```bash
+# 阅读技能包的完整文档
+openclaw hub readme @devtools/code-reviewer
+
+# 查看社区评价
+openclaw hub reviews @devtools/code-reviewer
+
+# 只看高分评价
+openclaw hub reviews @devtools/code-reviewer --min-rating 4
+
+# 查看该技能包的 changelog
+openclaw hub changelog @devtools/code-reviewer
+```
+
+#### 检查兼容性
+
+在安装之前，建议检查技能包与你当前环境的兼容性：
+
+```bash
+openclaw hub compat @devtools/code-reviewer
+```
+
+```
+Compatibility Check: @devtools/code-reviewer v2.3.1
+=====================================================
+OpenClaw Version:  v1.4.2     [PASS]  (requires >= 1.2.0)
+OS Platform:       linux       [PASS]  (supports all)
+Dependencies:      1 required  [PASS]  (all satisfied)
+Disk Space:        12 MB       [PASS]  (available: 8.2 GB)
+
+Result: Compatible. Ready to install.
 ```
 
 ### 安装技能
 
-找到心仪的技能包后，安装过程非常简单：
+找到心仪的技能包后，安装方式灵活多样，适应不同的使用场景。
+
+#### 从 ClawHub 安装（最常用）
 
 ```bash
 # 安装单个技能
@@ -44,102 +227,872 @@ openclaw skill install @devtools/sql-assistant
 # 安装多个技能
 openclaw skill install @devtools/sql-assistant @content/blog-writer @ops/docker-helper
 
-# 安装到特定工作空间
-openclaw skill install @devtools/sql-assistant --workspace my-project
+# 安装时查看详细过程
+openclaw skill install @devtools/code-reviewer --verbose
 ```
+
+安装过程的典型输出：
+
+```
+Installing @devtools/code-reviewer v2.3.1...
+  Resolving dependencies...
+  Installing dependency: @devtools/ast-parser v1.2.0
+  Downloading @devtools/code-reviewer (3.2 MB)...
+  Verifying checksum... OK
+  Registering skill... OK
+
+Successfully installed @devtools/code-reviewer v2.3.1
+  Dependencies installed: 1
+  Total size: 4.8 MB
+
+Tip: Run 'openclaw skill test @devtools/code-reviewer' to verify the installation.
+```
+
+#### 从 Git 仓库安装
+
+对于尚未发布到 ClawHub 的技能包，或者你想使用开发版本时：
+
+```bash
+# 从 GitHub 仓库安装
+openclaw skill install --git https://github.com/user/my-custom-skill.git
+
+# 安装指定分支
+openclaw skill install --git https://github.com/user/my-custom-skill.git --branch dev
+
+# 安装指定 commit
+openclaw skill install --git https://github.com/user/my-custom-skill.git --ref a1b2c3d
+```
+
+#### 从本地路径安装
+
+在开发和调试自定义技能时，直接从本地目录安装非常方便：
+
+```bash
+# 从本地目录安装
+openclaw skill install --local ./my-skill
+
+# 以开发模式安装（修改源文件后自动热更新）
+openclaw skill install --local ./my-skill --dev
+```
+
+开发模式特别适合技能开发者。源文件的任何修改都会立即生效，无需重新安装。
+
+#### 版本锁定
+
+在生产环境中，锁定技能版本可以避免因意外升级导致的兼容性问题：
+
+```bash
+# 安装指定版本
+openclaw skill install @devtools/code-reviewer@2.3.1
+
+# 安装时指定版本范围
+openclaw skill install @devtools/code-reviewer@">=2.0.0 <3.0.0"
+
+# 锁定当前所有已安装技能的版本
+openclaw skill lock
+
+# 查看版本锁定文件
+cat .openclaw/skill-lock.yaml
+```
+
+锁定文件 `skill-lock.yaml` 的内容示例：
+
+```yaml
+lockfile_version: 1
+locked_at: "2026-02-28T10:30:00Z"
+skills:
+  "@devtools/code-reviewer":
+    version: "2.3.1"
+    checksum: "sha256:a4f8e2d..."
+    dependencies:
+      "@devtools/ast-parser": "1.2.0"
+  "@content/blog-writer":
+    version: "1.8.0"
+    checksum: "sha256:b7c3f1e..."
+```
+
+#### 依赖解析
+
+当技能包之间存在依赖关系时，OpenClaw 会自动处理：
+
+```bash
+# 查看某个技能的依赖树
+openclaw skill deps @devtools/code-reviewer
+
+# 检测依赖冲突
+openclaw skill check-deps
+
+# 如果存在冲突，尝试自动解析
+openclaw skill resolve-deps
+```
+
+#### 全局安装 vs 工作空间安装
+
+技能可以安装到全局环境（所有项目可用）或仅安装到当前工作空间：
+
+```bash
+# 全局安装（默认行为）
+openclaw skill install @devtools/code-reviewer
+
+# 安装到当前工作空间
+openclaw skill install @devtools/code-reviewer --workspace
+
+# 安装到指定工作空间
+openclaw skill install @devtools/code-reviewer --workspace my-project
+
+# 查看全局技能与工作空间技能
+openclaw skill list --scope global
+openclaw skill list --scope workspace
+```
+
+工作空间级别的安装适用于项目专属的技能需求。例如，前端项目可能需要 `@devtools/react-helper`，但后端项目不需要。使用工作空间安装可以保持环境整洁。
 
 ### 热门技能推荐
 
-以下是当前最受欢迎的几个技能包，推荐新手优先安装：
+以下是当前最受欢迎的 8 个技能包，覆盖不同使用场景。推荐新手根据自己的工作需要选择性安装。
 
 #### 1. @devtools/code-reviewer（代码审查助手）
 
-自动审查代码质量，检测潜在 bug、安全漏洞和性能问题。
+**分类**：开发工具 | **评分**：4.8 | **安装量**：128,430
+
+自动审查代码质量，检测潜在 bug、安全漏洞和性能问题。支持 15 种编程语言，可深度定制审查规则。
 
 ```bash
 > 请用 code-reviewer 技能审查 ./src 目录下的所有 TypeScript 文件
+
+# 输出示例：
+# Code Review Report for ./src (TypeScript)
+# ==========================================
+# Files scanned: 47
+# Issues found: 12 (3 critical, 5 warning, 4 info)
+#
+# [CRITICAL] src/auth/login.ts:42
+#   Potential SQL injection in user input handling
+#   Suggestion: Use parameterized queries instead of string concatenation
+# ...
 ```
 
 #### 2. @content/blog-writer（博客写作助手）
 
-帮你快速创作高质量的技术博客文章，支持 SEO 优化。
+**分类**：内容创作 | **评分**：4.6 | **安装量**：89,210
+
+帮你快速创作高质量的技术博客文章。支持 SEO 优化、多语言写作、自动生成文章大纲和配图建议。
 
 ```bash
 > 使用 blog-writer 帮我写一篇关于 React Server Components 的技术博客
+
+# 输出示例：
+# Blog Draft Generated
+# ====================
+# Title: "React Server Components 实战指南：从原理到落地"
+# Word Count: 2,100
+# SEO Score: 92/100
+# Sections: 6
+# Estimated Read Time: 8 min
+#
+# [Draft saved to ./drafts/react-server-components.md]
 ```
 
 #### 3. @ops/docker-helper（Docker 运维助手）
 
-Docker 相关的一切操作，包括编写 Dockerfile、排查容器问题等。
+**分类**：运维部署 | **评分**：4.7 | **安装量**：76,540
+
+Docker 相关的一切操作，包括编写 Dockerfile、排查容器问题、优化镜像体积、管理 Docker Compose 配置。
 
 ```bash
 > 请用 docker-helper 帮我优化当前项目的 Dockerfile，减小镜像体积
+
+# 输出示例：
+# Dockerfile Optimization Report
+# ===============================
+# Current image size: 1.2 GB
+# Optimized image size: 340 MB (72% reduction)
+#
+# Changes applied:
+# 1. Switched base image from node:18 to node:18-alpine
+# 2. Added multi-stage build to separate build and runtime
+# 3. Optimized layer caching order
+# 4. Removed dev dependencies from production image
+#
+# [Optimized Dockerfile saved to ./Dockerfile.optimized]
 ```
 
 #### 4. @data/csv-analyzer（数据分析助手）
 
-读取和分析 CSV、Excel 等数据文件，生成可视化图表。
+**分类**：数据分析 | **评分**：4.5 | **安装量**：62,300
+
+读取和分析 CSV、Excel、JSON 等数据文件。支持统计分析、异常检测、趋势预测，并生成可视化图表。
 
 ```bash
 > 用 csv-analyzer 分析 ./data/sales.csv，生成月度趋势图
+
+# 输出示例：
+# Data Analysis: ./data/sales.csv
+# ================================
+# Rows: 12,480 | Columns: 8 | Date Range: 2025-01 to 2026-02
+#
+# Key Findings:
+# - Monthly revenue grew 23% YoY
+# - Q4 2025 saw the highest seasonal spike
+# - Product category "Electronics" contributes 42% of total revenue
+#
+# [Chart saved to ./output/sales-monthly-trend.png]
+# [Full report saved to ./output/sales-analysis.md]
 ```
 
-### 技能管理
+#### 5. @design/color-palette（配色方案助手）
 
-安装技能后，你可能需要进行一些管理操作：
+**分类**：设计辅助 | **评分**：4.5 | **安装量**：42,100
+
+根据品牌定位、使用场景和无障碍标准，智能生成配色方案。支持导出为 CSS 变量、Tailwind 配置和设计 Token。
 
 ```bash
-# 查看已安装的技能列表
-openclaw skill list
+> 使用 color-palette 为科技类 SaaS 产品生成一套专业配色方案，要求支持暗色模式
 
-# 更新技能到最新版本
-openclaw skill update @devtools/sql-assistant
-
-# 批量更新所有技能
-openclaw skill update --all
-
-# 卸载不需要的技能
-openclaw skill remove @content/blog-writer
-
-# 查看技能使用统计
-openclaw skill stats
+# 输出示例：
+# Color Palette Generated
+# =======================
+# Theme: Tech SaaS Professional
+# Mode: Light + Dark
+#
+# Primary:   #2563EB (Blue 600)
+# Secondary: #7C3AED (Violet 600)
+# Accent:    #06B6D4 (Cyan 500)
+# Neutral:   #374151 (Gray 700)
+#
+# WCAG AA Contrast: All combinations PASS
+#
+# [Exported to ./design/colors.css]
+# [Exported to ./design/tailwind-colors.js]
 ```
 
-### 技能配置
+#### 6. @security/dep-scanner（依赖安全扫描）
 
-大多数技能支持自定义配置。在工作空间的配置文件中添加技能设置：
+**分类**：安全审计 | **评分**：4.7 | **安装量**：58,920
+
+扫描项目依赖库中的已知安全漏洞。支持 npm、pip、Maven、Cargo 等主流包管理器，并提供修复建议。
+
+```bash
+> 用 dep-scanner 扫描当前项目的所有依赖项，检查安全漏洞
+
+# 输出示例：
+# Dependency Security Scan
+# ========================
+# Package Manager: npm
+# Dependencies Scanned: 342 (128 direct, 214 transitive)
+#
+# Vulnerabilities Found: 4
+#   [HIGH]   lodash@4.17.20    - Prototype Pollution (CVE-2021-23337)
+#            Fix: Upgrade to lodash@4.17.21
+#   [MEDIUM] axios@0.21.1      - SSRF Vulnerability (CVE-2023-45857)
+#            Fix: Upgrade to axios@1.6.0
+#   ...
+#
+# Run 'openclaw skill run @security/dep-scanner --fix' to auto-fix.
+```
+
+#### 7. @productivity/meeting-notes（会议纪要助手）
+
+**分类**：效率提升 | **评分**：4.3 | **安装量**：49,800
+
+从会议录音或文字记录中自动提取关键信息，生成结构化会议纪要。支持识别决策事项、待办任务和责任人。
+
+```bash
+> 用 meeting-notes 处理 ./recordings/standup-0228.txt，生成会议纪要
+
+# 输出示例：
+# Meeting Notes: Daily Standup 2026-02-28
+# ========================================
+# Duration: 15 min | Participants: 6
+#
+# Key Decisions:
+# 1. API v2 发布日期推迟到 3 月 15 日
+# 2. 新增性能测试环节纳入 CI 流程
+#
+# Action Items:
+# - [张三] 完成用户认证模块重构 (Deadline: 3/5)
+# - [李四] 编写 API v2 迁移文档 (Deadline: 3/10)
+# - [王五] 搭建性能测试基础设施 (Deadline: 3/8)
+#
+# [Saved to ./notes/standup-0228.md]
+```
+
+#### 8. @communication/email-craft（邮件撰写助手）
+
+**分类**：沟通协作 | **评分**：4.2 | **安装量**：38,900
+
+根据场景和对象智能撰写专业邮件。支持商务、技术、客户服务等多种沟通场景，可调节正式程度。
+
+```bash
+> 用 email-craft 帮我写一封给客户的项目延期通知邮件，语气要专业但诚恳
+
+# 输出示例：
+# Email Draft
+# ===========
+# Subject: 关于项目交付时间调整的通知
+# Tone: Professional, Empathetic
+# Word Count: 280
+#
+# 尊敬的 [客户名称]：
+#
+# 感谢您一直以来对我们团队的信任与支持。经过慎重评估，
+# 我们需要就项目交付时间的调整与您进行沟通...
+#
+# [Draft saved to ./drafts/delay-notice-email.md]
+# [Tip: Use --variants 3 to generate multiple tone options]
+```
+
+### 技能配置深度指南
+
+大多数技能支持自定义配置，让技能行为适配你的具体需求。
+
+#### 配置文件位置
+
+技能配置可以在多个层级设置，按优先级从高到低排列：
+
+1. **命令行参数**：单次执行时的临时配置
+2. **工作空间配置**：`.openclaw/workspace.yaml` 中的 skills 段
+3. **全局配置**：`~/.openclaw/config.yaml` 中的 skills 段
+4. **技能默认配置**：技能包自带的 `defaults.yaml`
+
+#### 完整配置 Schema
+
+以下是一个包含多种配置选项的完整示例：
 
 ```yaml
+# .openclaw/workspace.yaml
 skills:
   "@devtools/code-reviewer":
-    severity: strict
-    languages: ["typescript", "python"]
-    ignore_patterns: ["*.test.ts", "*.spec.ts"]
+    # 基础设置
+    enabled: true
+    severity: strict          # strict | normal | relaxed
+    languages:
+      - typescript
+      - python
+      - go
+    ignore_patterns:
+      - "*.test.ts"
+      - "*.spec.ts"
+      - "vendor/**"
+      - "node_modules/**"
+
+    # 规则定制
+    rules:
+      security: error         # 安全问题视为 error
+      performance: warning    # 性能问题视为 warning
+      style: info             # 风格问题视为 info
+      complexity:
+        max_cyclomatic: 15    # 圈复杂度上限
+        max_line_length: 120  # 单行字符上限
+
+    # 输出配置
+    output:
+      format: markdown        # markdown | json | html
+      save_to: "./reports/"
+      include_suggestions: true
+
   "@content/blog-writer":
     default_language: "zh-CN"
     style: "technical"
     word_count: 1500
+    seo:
+      enabled: true
+      target_keywords: ["OpenClaw", "AI 助手", "效率工具"]
+    tone: "professional"      # professional | casual | academic
+
+  "@data/csv-analyzer":
+    max_rows: 100000
+    chart_engine: "matplotlib"
+    default_output_dir: "./analysis-output/"
+    date_format: "YYYY-MM-DD"
+    encoding: "utf-8"
 ```
 
-### 组合使用技能
+#### 环境变量配置
 
-技能包的真正威力在于组合使用。例如：
+某些技能需要通过环境变量传递敏感信息（如 API 密钥）：
 
 ```bash
-> 请执行以下工作流：
-  1. 用 code-reviewer 审查 ./src 目录
-  2. 根据审查结果自动修复代码问题
-  3. 用 blog-writer 生成一份本次代码优化的总结报告
+# 在 .env 文件中设置
+CLAWHUB_OPENAI_KEY=sk-xxxxx
+CLAWHUB_GITHUB_TOKEN=ghp_xxxxx
+CLAWHUB_SLACK_WEBHOOK=https://hooks.slack.com/xxxxx
 ```
 
-多个技能协同工作，可以完成单个技能无法实现的复杂任务。
+在技能配置中引用环境变量：
+
+```yaml
+skills:
+  "@communication/email-craft":
+    smtp:
+      host: "smtp.example.com"
+      port: 587
+      username: "${EMAIL_USERNAME}"
+      password: "${EMAIL_PASSWORD}"
+```
+
+#### 工作空间配置覆盖
+
+当你在多个项目中使用同一个技能但需要不同配置时，可以利用工作空间级别的覆盖：
+
+```bash
+# 查看某个技能当前生效的配置（合并后的结果）
+openclaw skill config @devtools/code-reviewer --effective
+
+# 在当前工作空间覆盖某个配置项
+openclaw skill config @devtools/code-reviewer --set severity=relaxed --workspace
+
+# 重置工作空间的覆盖，回退到全局配置
+openclaw skill config @devtools/code-reviewer --reset --workspace
+```
+
+配置继承的合并规则：工作空间配置会与全局配置进行深度合并（deep merge）。对于数组字段，工作空间配置会完全替换全局配置（而非追加）。如果需要追加行为，可以使用 `+` 前缀：
+
+```yaml
+# 全局配置
+skills:
+  "@devtools/code-reviewer":
+    languages: ["typescript", "python"]
+
+# 工作空间配置 - 替换行为（最终结果只有 go）
+skills:
+  "@devtools/code-reviewer":
+    languages: ["go"]
+
+# 工作空间配置 - 追加行为（最终结果为 typescript, python, go）
+skills:
+  "@devtools/code-reviewer":
+    "+languages": ["go"]
+```
+
+### 技能组合工作流
+
+技能包的真正威力在于组合使用。通过多个技能的协同，可以构建强大的自动化工作流。
+
+#### 工作流一：代码审查与修复流水线
+
+将代码审查、安全扫描、自动修复串联起来，形成完整的代码质量保障流程：
+
+```bash
+> 请执行以下代码审查工作流：
+  1. 用 code-reviewer 审查 ./src 目录下的所有 TypeScript 文件
+  2. 用 dep-scanner 扫描项目依赖的安全漏洞
+  3. 根据步骤 1 和 2 的结果，自动修复可以安全修复的问题
+  4. 对修复后的代码再次运行审查，确认问题已解决
+  5. 生成一份完整的代码质量报告，保存为 ./reports/quality-report.md
+```
+
+你也可以将这个工作流保存为可复用的模板：
+
+```yaml
+# .openclaw/workflows/code-quality.yaml
+name: "代码质量流水线"
+description: "全面审查代码质量并自动修复"
+skills_required:
+  - "@devtools/code-reviewer"
+  - "@security/dep-scanner"
+steps:
+  - name: "代码审查"
+    skill: "@devtools/code-reviewer"
+    params:
+      path: "./src"
+      severity: strict
+    output: review_result
+
+  - name: "依赖安全扫描"
+    skill: "@security/dep-scanner"
+    params:
+      auto_fix: false
+    output: scan_result
+
+  - name: "自动修复"
+    task: "根据 ${review_result} 和 ${scan_result}，修复所有可安全自动修复的问题"
+    output: fix_result
+
+  - name: "二次验证"
+    skill: "@devtools/code-reviewer"
+    params:
+      path: "./src"
+      severity: strict
+    depends_on: "自动修复"
+
+  - name: "生成报告"
+    task: "汇总所有步骤结果，生成质量报告保存到 ./reports/quality-report.md"
+```
+
+运行保存的工作流：
+
+```bash
+openclaw workflow run code-quality
+```
+
+#### 工作流二：内容创作流水线
+
+从选题到发布的完整内容创作流程：
+
+```bash
+> 请执行以下内容创作工作流：
+  1. 搜索本周 AI 领域的三大热点话题
+  2. 用 blog-writer 为排名第一的话题撰写一篇 2000 字的技术博客
+  3. 用 email-craft 生成一封推广邮件，摘要介绍这篇博客
+  4. 将博客保存为 Markdown 文件，邮件保存为单独文件
+```
+
+对应的工作流配置：
+
+```yaml
+# .openclaw/workflows/content-pipeline.yaml
+name: "内容创作流水线"
+skills_required:
+  - "@content/blog-writer"
+  - "@communication/email-craft"
+steps:
+  - name: "热点调研"
+    task: "搜索本周 AI 领域的热点话题，选出前三名"
+    output: topics
+
+  - name: "文章撰写"
+    skill: "@content/blog-writer"
+    params:
+      topic: "${topics[0]}"
+      word_count: 2000
+      language: "zh-CN"
+      seo: true
+    output: article
+    depends_on: "热点调研"
+
+  - name: "推广邮件"
+    skill: "@communication/email-craft"
+    params:
+      type: "promotion"
+      reference: "${article}"
+      tone: "engaging"
+    output: email
+    depends_on: "文章撰写"
+
+  - name: "保存输出"
+    task: "将文章保存到 ./content/blog/ 目录，邮件保存到 ./content/emails/ 目录"
+    depends_on:
+      - "文章撰写"
+      - "推广邮件"
+```
+
+#### 工作流三：部署与监控流水线
+
+将代码检查、容器构建、部署和监控串联起来：
+
+```bash
+> 请执行以下部署工作流：
+  1. 用 code-reviewer 对 ./src 做快速审查，确认无 critical 级别问题
+  2. 用 dep-scanner 确认没有高危安全漏洞
+  3. 用 docker-helper 构建优化后的生产镜像
+  4. 输出部署检查清单和操作命令，保存到 ./deploy/checklist.md
+```
+
+通过组合不同技能，你可以为团队的各种工作场景定制标准化流程，既提升效率，又保证质量。
+
+### 技能版本管理与更新
+
+在长期使用中，管理技能版本是保持环境稳定的关键。
+
+#### 查看和更新技能
+
+```bash
+# 查看已安装的技能及其版本
+openclaw skill list
+
+# 典型输出：
+# Installed Skills
+# =================
+# Scope: Global
+#   @devtools/code-reviewer   v2.3.1   (latest: v2.3.1)
+#   @content/blog-writer      v1.7.0   (latest: v1.8.0)  [update available]
+#   @ops/docker-helper        v3.1.2   (latest: v3.1.2)
+#
+# Scope: Workspace (my-project)
+#   @data/csv-analyzer        v2.0.1   (latest: v2.1.0)  [update available]
+
+# 更新单个技能到最新版本
+openclaw skill update @content/blog-writer
+
+# 更新到指定版本
+openclaw skill update @content/blog-writer@1.7.5
+
+# 批量更新所有技能
+openclaw skill update --all
+
+# 仅更新补丁版本（安全更新），跳过功能更新
+openclaw skill update --all --patch-only
+```
+
+#### 处理破坏性变更
+
+当技能发布了包含破坏性变更（breaking changes）的大版本更新时，OpenClaw 会进行提示：
+
+```bash
+openclaw skill update @devtools/code-reviewer
+
+# 输出：
+# Warning: @devtools/code-reviewer v3.0.0 contains breaking changes:
+#   - Config field 'severity' renamed to 'review_level'
+#   - Removed support for 'json' output format (use 'structured' instead)
+#   - Minimum OpenClaw version raised to 1.5.0
+#
+# Your current config may need updates. Run with --dry-run to preview changes.
+# Proceed with upgrade? [y/N]
+```
+
+使用 `--dry-run` 预览更新影响：
+
+```bash
+openclaw skill update @devtools/code-reviewer@3.0.0 --dry-run
+```
+
+#### 回滚到旧版本
+
+如果更新后出现问题，可以快速回滚：
+
+```bash
+# 回滚到上一个版本
+openclaw skill rollback @devtools/code-reviewer
+
+# 回滚到指定版本
+openclaw skill install @devtools/code-reviewer@2.3.1 --force
+
+# 查看某个技能的本地安装历史
+openclaw skill history @devtools/code-reviewer
+
+# 输出：
+# Version History: @devtools/code-reviewer
+# =========================================
+#   v2.3.1   installed 2026-02-20   [current]
+#   v2.3.0   installed 2026-02-01   rolled back 2026-02-20
+#   v2.2.0   installed 2026-01-15   upgraded 2026-02-01
+```
+
+#### 自动更新策略
+
+你可以为不同技能配置不同的自动更新策略：
+
+```yaml
+# ~/.openclaw/config.yaml
+skill_updates:
+  auto_update: true
+  schedule: "weekly"           # daily | weekly | manual
+  policies:
+    "@devtools/*":
+      strategy: "patch-only"   # 仅自动更新补丁版本
+    "@security/*":
+      strategy: "minor"        # 自动更新补丁和小版本
+    "@content/*":
+      strategy: "manual"       # 不自动更新，仅通知
+  notifications:
+    channel: "terminal"        # terminal | email | slack
+```
+
+### 技能开发入门
+
+如果 ClawHub 上找不到满足你需求的技能，你完全可以自己开发一个。这里简要介绍技能开发的基本流程。
+
+#### 技能目录结构
+
+一个标准的 OpenClaw 技能包有以下目录结构：
+
+```
+my-awesome-skill/
+  manifest.yaml          # 技能元信息声明
+  main.clawskill         # 技能入口文件
+  prompts/               # 提示词模板目录
+    default.md
+    advanced.md
+  config/
+    defaults.yaml        # 默认配置
+    schema.json          # 配置校验 Schema
+  examples/              # 使用示例
+    basic-usage.md
+  tests/                 # 测试用例
+    test_basic.yaml
+  README.md              # 技能说明文档
+  LICENSE
+```
+
+#### manifest.yaml
+
+这是技能包的"身份证"，包含所有元信息：
+
+```yaml
+name: "@yourname/my-awesome-skill"
+version: "1.0.0"
+description: "一个很棒的自定义技能"
+author: "Your Name"
+license: "MIT"
+homepage: "https://github.com/yourname/my-awesome-skill"
+
+# 兼容性要求
+engine:
+  openclaw: ">=1.2.0"
+
+# 依赖的其他技能
+dependencies:
+  "@devtools/ast-parser": ">=1.0.0"
+
+# 分类和标签
+category: "devtools"
+tags:
+  - "code-quality"
+  - "automation"
+
+# 技能能力声明
+capabilities:
+  - file_read
+  - file_write
+  - network_access
+```
+
+#### 入口文件 main.clawskill
+
+入口文件定义了技能的核心行为：
+
+```yaml
+# main.clawskill
+name: "My Awesome Skill"
+description: "执行自定义的代码分析任务"
+
+# 技能接受的输入参数
+inputs:
+  path:
+    type: string
+    description: "要分析的目录路径"
+    required: true
+  format:
+    type: string
+    description: "输出格式"
+    default: "markdown"
+    enum: ["markdown", "json", "html"]
+
+# 技能执行流程
+steps:
+  - name: "扫描文件"
+    action: glob
+    params:
+      pattern: "${inputs.path}/**/*.ts"
+    output: files
+
+  - name: "分析代码"
+    action: prompt
+    template: "prompts/default.md"
+    context:
+      files: "${files}"
+    output: analysis
+
+  - name: "生成报告"
+    action: format
+    params:
+      data: "${analysis}"
+      format: "${inputs.format}"
+    output: report
+
+# 技能输出
+outputs:
+  report:
+    type: string
+    description: "分析报告内容"
+```
+
+#### 本地开发与测试
+
+```bash
+# 初始化一个新技能项目（使用脚手架模板）
+openclaw skill init my-awesome-skill
+
+# 以开发模式加载本地技能
+openclaw skill install --local ./my-awesome-skill --dev
+
+# 运行技能测试
+openclaw skill test ./my-awesome-skill
+
+# 验证 manifest 和结构是否符合规范
+openclaw skill validate ./my-awesome-skill
+```
+
+#### 发布到 ClawHub
+
+当技能开发完成并测试通过后，可以发布到 ClawHub 与社区分享：
+
+```bash
+# 登录 ClawHub（首次发布需要）
+openclaw hub login
+
+# 发布前的预检查
+openclaw hub publish --dry-run
+
+# 正式发布
+openclaw hub publish
+
+# 发布后查看你的技能页面
+openclaw hub info @yourname/my-awesome-skill
+```
+
+关于技能开发的完整教程，包括高级提示词工程、多步骤编排、上下文管理和性能优化等内容，请参阅精品课 Module 5。
+
+### 动手练习
+
+以下三个练习帮助你巩固今天学到的内容。建议按顺序完成。
+
+#### 练习一：技能发现与安装
+
+1. 使用 `openclaw hub browse` 浏览 ClawHub 技能市场
+2. 在 @devtools 分类下搜索一个你感兴趣的技能，查看它的详情和社区评价
+3. 安装这个技能到你的全局环境
+4. 用 `openclaw skill list` 确认安装成功
+5. 尝试运行该技能的基本功能
+
+验证命令：
+
+```bash
+openclaw skill list | grep "你安装的技能名"
+```
+
+#### 练习二：技能配置与定制
+
+1. 为你在练习一中安装的技能创建工作空间级别的配置
+2. 在 `.openclaw/workspace.yaml` 中添加至少 3 个自定义配置项
+3. 用 `openclaw skill config --effective` 命令确认配置已生效
+4. 用不同的配置参数运行技能两次，对比输出结果的差异
+
+参考配置模板：
+
+```yaml
+# .openclaw/workspace.yaml
+skills:
+  "@devtools/你选择的技能":
+    # 在此添加你的配置项
+    setting_1: value_1
+    setting_2: value_2
+    setting_3: value_3
+```
+
+#### 练习三：多技能组合工作流
+
+1. 确保你至少安装了两个不同分类的技能（例如一个 @devtools 和一个 @content）
+2. 设计一个需要两个技能协同完成的任务场景
+3. 在一条自然语言指令中描述这个多步骤任务，让 OpenClaw 自动协调两个技能完成
+4. 将你的工作流保存为 `.openclaw/workflows/` 目录下的 YAML 文件
+
+完成这三个练习后，你应该能够熟练地在 ClawHub 中发现、安装、配置和组合使用技能包了。
 
 ### 今日小结
 
-今天你进入了 ClawHub 的世界，学到了：
+今天你深入探索了 ClawHub 的世界，掌握了以下核心技能：
 
-1. ClawHub 技能生态系统的基本概念
-2. 如何搜索、安装和管理技能包
-3. 如何配置和组合使用多个技能
+1. **理解 ClawHub 生态系统**：了解了技能市场的分类体系、质量评分和社区治理模型
+2. **发现与评估技能**：学会了浏览、搜索、查看详情和检查兼容性的完整流程
+3. **灵活安装技能**：掌握了从 Hub、Git、本地路径安装技能的多种方式，以及版本锁定和作用域管理
+4. **配置与定制技能**：了解了多层级配置体系、环境变量和工作空间覆盖机制
+5. **组合使用技能**：通过三个工作流示例，学会了让多个技能协同完成复杂任务
+6. **管理技能版本**：掌握了更新、回滚和自动更新策略的配置
+7. **技能开发初探**：了解了自定义技能的基本结构和发布流程
+
+从今天开始，你的 OpenClaw 不再是一个固定能力的工具，而是一个可以无限扩展的智能平台。根据你的实际工作需要，去 ClawHub 探索更多有用的技能包吧。
 
 > 💡 **想开发自己的技能？** 自定义 Skill 开发教程 → 精品课 Module 5

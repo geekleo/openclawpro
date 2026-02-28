@@ -11,6 +11,12 @@ hook: "Multi-Agent 架构设计 → 精品课 Module 7"
 
 恭喜你来到七天训练营的最后一天！今天我们将探索 OpenClaw 最令人兴奋的高级功能——多 Agent 协作和浏览器控制。掌握这些技能后，你将真正理解 AI 助手的无限可能。
 
+在前六天里，你学会了和单个 AI 助手高效沟通、管理文件、联网搜索、扩展技能、设置自动化任务。但这些都是"一个人"在干活。今天，我们要让一群 AI 助手组成团队协作，再加上浏览器控制能力，让它们能够真正"看见"并"操作"互联网世界。
+
+这就是 OpenClaw 的终极形态：一个由多个专业 Agent 组成的智能团队，不仅能思考和分析，还能像人类一样浏览网页、填写表单、提取数据。当这两项能力结合在一起，你拥有的不再是一个工具，而是一支全天候在线的数字员工团队。
+
+---
+
 ### 多 Agent 架构
 
 单个 AI 代理虽然强大，但面对复杂任务时，多个专业化的 Agent 协同工作可以产生 1+1 远大于 2 的效果。
@@ -19,50 +25,426 @@ hook: "Multi-Agent 架构设计 → 精品课 Module 7"
 
 想象你有一个开发团队：前端工程师、后端工程师、测试工程师、产品经理。每个人都有自己的专业领域，他们协同工作完成一个项目。多 Agent 模式就是这个概念的 AI 版本。
 
-#### 创建 Agent 团队
+每个 Agent 具备独立的角色定义、专属技能和记忆空间，同时又能在统一的协作框架下彼此通信、共享信息、协调行动。
+
+#### 架构模式
+
+OpenClaw 支持三种主要的多 Agent 架构模式，适用于不同的场景：
+
+**流水线模式（Pipeline）**
+
+任务像工厂流水线一样，从一个 Agent 传递到下一个 Agent，每个 Agent 完成自己的环节后将结果交给下游。适合有明确先后顺序的任务。
 
 ```yaml
+architecture: pipeline
+flow:
+  - agent: researcher    # 第一步：研究员收集资料
+  - agent: analyst       # 第二步：分析师处理数据
+  - agent: writer        # 第三步：作者撰写报告
+  - agent: editor        # 第四步：编辑校审定稿
+```
+
+**中心辐射模式（Hub-Spoke）**
+
+一个"总管"Agent 负责分配任务、汇总结果，其他 Agent 各自独立执行子任务后向总管汇报。适合可以并行处理的任务。
+
+```yaml
+architecture: hub-spoke
+hub: project_manager
+spokes:
+  - agent: frontend_dev
+    task: "开发前端页面"
+  - agent: backend_dev
+    task: "开发后端 API"
+  - agent: designer
+    task: "设计 UI 素材"
+```
+
+**对等协作模式（Peer-to-Peer）**
+
+所有 Agent 地位平等，可以互相发起对话和请求，通过协商达成共识。适合需要反复讨论和迭代的创意性任务。
+
+```yaml
+architecture: peer-to-peer
+agents: [designer, copywriter, marketer]
+communication: open    # 任意 Agent 可以与其他 Agent 对话
+consensus: majority     # 多数同意即可推进
+```
+
+#### Agent 通信机制
+
+多个 Agent 之间如何交换信息？OpenClaw 提供了三种通信方式：
+
+```yaml
+communication:
+  # 直接消息：一对一传递信息
+  direct_message:
+    from: analyst
+    to: writer
+    content: "分析结果已完成，请开始撰写"
+
+  # 广播：一个 Agent 向所有人发送消息
+  broadcast:
+    from: project_manager
+    content: "需求有变更，请查看更新"
+
+  # 共享看板：所有 Agent 可以读写的公共空间
+  shared_board:
+    enabled: true
+    sections: ["待办", "进行中", "已完成"]
+```
+
+#### 共享记忆与上下文
+
+Agent 之间可以共享记忆和上下文信息，避免重复劳动：
+
+```yaml
+memory:
+  # 共享上下文：所有 Agent 都能访问
+  shared_context:
+    project_name: "电商平台 v2.0"
+    tech_stack: ["React", "Node.js", "PostgreSQL"]
+    deadline: "2025-03-01"
+
+  # 共享文件空间：Agent 可以读写同一组文件
+  shared_workspace: "./workspace/shared/"
+
+  # 对话历史：是否允许 Agent 查看其他 Agent 的对话记录
+  conversation_sharing: true
+```
+
+#### Agent 生命周期管理
+
+每个 Agent 都有完整的生命周期，你可以精确控制它们的启动、暂停和终止：
+
+```bash
+# 查看当前所有 Agent 状态
+openclaw agent list
+
+# 启动指定 Agent
+openclaw agent start architect
+
+# 暂停 Agent（保留上下文）
+openclaw agent pause developer
+
+# 恢复已暂停的 Agent
+openclaw agent resume developer
+
+# 终止 Agent（释放资源）
+openclaw agent stop tester
+```
+
+---
+
+### 创建 Agent 团队
+
+下面是一个完整的 Agent 团队配置示例，展示了所有可用的配置选项：
+
+```yaml
+team:
+  name: "全栈开发团队"
+  architecture: pipeline
+  max_iterations: 10       # 最多迭代 10 轮
+  timeout: 3600            # 超时时间 3600 秒
+
 agents:
   architect:
     name: "架构师"
     role: "负责系统架构设计和技术决策"
     model: gpt-4
-    skills: ["@devtools/system-design"]
+    temperature: 0.3         # 低温度，保证决策的稳定性
+    skills:
+      - "@devtools/system-design"
+      - "@devtools/api-designer"
+    memory:
+      type: persistent       # 持久化记忆，跨会话保留
+      capacity: 50000        # 记忆容量上限（token 数）
+    communication:
+      can_talk_to: [developer, tester]
+      priority: high          # 高优先级，其消息优先处理
 
   developer:
     name: "开发者"
-    role: "负责代码编写和实现"
+    role: "负责代码编写和功能实现"
     model: gpt-4
-    skills: ["@devtools/code-reviewer", "@devtools/sql-assistant"]
+    temperature: 0.2         # 代码生成需要更低的随机性
+    skills:
+      - "@devtools/code-reviewer"
+      - "@devtools/sql-assistant"
+      - "@devtools/git-helper"
+    memory:
+      type: session           # 会话级记忆，任务结束后清除
+      capacity: 100000
+    communication:
+      can_talk_to: [architect, tester, reviewer]
+      priority: medium
 
   tester:
     name: "测试工程师"
     role: "负责编写测试用例和质量保障"
     model: gpt-4
-    skills: ["@devtools/test-generator"]
+    temperature: 0.1
+    skills:
+      - "@devtools/test-generator"
+      - "@devtools/coverage-checker"
+    memory:
+      type: session
+      capacity: 50000
+    communication:
+      can_talk_to: [developer, reviewer]
+      priority: medium
 
   reviewer:
     name: "代码审查员"
     role: "负责代码审查和最佳实践检查"
     model: gpt-4
-    skills: ["@devtools/code-reviewer"]
+    temperature: 0.3
+    skills:
+      - "@devtools/code-reviewer"
+      - "@devtools/security-scanner"
+    memory:
+      type: session
+      capacity: 50000
+    communication:
+      can_talk_to: [developer, architect]
+      priority: high
 ```
 
-#### 多 Agent 协作流程
+启动这个团队：
+
+```bash
+# 从配置文件创建团队
+openclaw team create --config ./team-config.yaml
+
+# 查看团队状态
+openclaw team status
+
+# 给团队分配任务
+openclaw team run "开发一个用户注册登录系统，包含邮箱验证和密码重置功能"
+```
+
+---
+
+### 多 Agent 协作实战
+
+下面通过三个完整的场景，展示多 Agent 协作的强大之处。
+
+#### 场景一：软件开发团队
 
 ```bash
 > 请用多 Agent 模式完成以下项目：
   开发一个用户注册登录系统
 
   工作流程：
-  1. 架构师 → 设计系统架构和 API 接口
-  2. 开发者 → 根据架构设计编写代码
-  3. 测试工程师 → 编写并执行测试用例
-  4. 代码审查员 → 审查代码质量
-  5. 开发者 → 根据审查意见修改代码
+  1. 架构师 - 设计系统架构和 API 接口
+  2. 开发者 - 根据架构设计编写代码
+  3. 测试工程师 - 编写并执行测试用例
+  4. 代码审查员 - 审查代码质量
+  5. 开发者 - 根据审查意见修改代码
 ```
 
 执行这个命令后，你会看到多个 Agent 像真实的团队一样协作。架构师先输出设计方案，开发者据此编写代码，测试工程师验证功能，审查员提出改进意见——整个流程全自动完成。
+
+完整的配置与预期输出：
+
+```yaml
+workflow:
+  name: "用户注册登录系统"
+  architecture: pipeline
+
+  steps:
+    - agent: architect
+      action: |
+        1. 设计用户表结构（users, sessions, verification_tokens）
+        2. 定义 REST API 接口（POST /register, POST /login, POST /verify）
+        3. 绘制系统架构图
+        4. 输出技术选型文档
+      output: "architecture-doc.md"
+
+    - agent: developer
+      action: |
+        1. 根据架构文档搭建项目骨架
+        2. 实现用户注册接口（含邮箱验证）
+        3. 实现用户登录接口（含 JWT 签发）
+        4. 实现密码重置流程
+      depends_on: architect
+      output: "./src/"
+
+    - agent: tester
+      action: |
+        1. 编写单元测试覆盖所有接口
+        2. 编写集成测试验证完整流程
+        3. 执行测试并生成覆盖率报告
+      depends_on: developer
+      output: "./tests/, coverage-report.html"
+
+    - agent: reviewer
+      action: |
+        1. 审查代码是否符合最佳实践
+        2. 检查安全漏洞（SQL 注入、XSS 等）
+        3. 验证错误处理是否完善
+        4. 输出审查报告和修改建议
+      depends_on: tester
+      output: "review-report.md"
+
+    - agent: developer
+      action: "根据审查报告修复所有标记为 critical 和 major 的问题"
+      depends_on: reviewer
+      output: "./src/"
+```
+
+#### 场景二：内容创作团队
+
+```yaml
+team:
+  name: "内容创作团队"
+  architecture: hub-spoke
+
+agents:
+  editor_in_chief:
+    name: "主编"
+    role: "负责选题策划、内容审核和最终定稿"
+    model: gpt-4
+    skills: ["@content/topic-planner", "@content/quality-checker"]
+
+  researcher:
+    name: "调研员"
+    role: "负责资料搜集、事实核查和数据整理"
+    model: gpt-4
+    skills: ["@search/web-researcher", "@data/fact-checker"]
+
+  writer:
+    name: "撰稿人"
+    role: "负责文章撰写、文案润色"
+    model: gpt-4
+    skills: ["@content/blog-writer", "@content/seo-optimizer"]
+
+  designer:
+    name: "配图师"
+    role: "负责文章配图、信息图设计"
+    model: gpt-4
+    skills: ["@design/image-generator", "@design/infographic"]
+```
+
+运行内容创作任务：
+
+```bash
+> 用内容创作团队撰写一篇关于"2025 年 AI Agent 技术趋势"的深度文章
+
+  工作流程：
+  1. 主编确定文章大纲和核心观点
+  2. 调研员收集最新的行业报告和案例数据
+  3. 撰稿人根据大纲和资料完成初稿（3000 字）
+  4. 配图师为文章创建 3 张信息图
+  5. 主编做最终审核和修改
+```
+
+预期输出：一篇结构完整、数据详实、配图精美的深度技术文章，包含 Markdown 文件和配图素材。
+
+#### 场景三：研究分析团队
+
+```yaml
+team:
+  name: "市场研究团队"
+  architecture: pipeline
+
+agents:
+  data_collector:
+    name: "数据采集员"
+    role: "从多个渠道收集市场数据和竞品信息"
+    model: gpt-4
+    skills: ["@search/web-researcher", "@data/csv-analyzer"]
+    browser: true   # 启用浏览器控制能力
+
+  data_analyst:
+    name: "数据分析师"
+    role: "对采集的原始数据进行清洗、统计和建模"
+    model: gpt-4
+    skills: ["@data/csv-analyzer", "@data/chart-generator"]
+
+  strategist:
+    name: "策略顾问"
+    role: "基于分析结果提出商业洞察和行动建议"
+    model: gpt-4
+    skills: ["@content/report-writer"]
+```
+
+运行研究分析任务：
+
+```bash
+> 用研究团队分析国内 AI 编程助手市场的竞争格局
+
+  工作流程：
+  1. 数据采集员 - 收集 5 家主要竞品的产品功能、定价、用户评价
+  2. 数据分析师 - 对比分析功能差异、价格策略、用户满意度
+  3. 策略顾问 - 输出市场定位建议和产品差异化策略
+```
+
+预期输出：一份完整的市场分析报告，包含对比表格、趋势图表和策略建议。
+
+---
+
+### Agent 调试与监控
+
+当多个 Agent 同时工作时，你需要有效的工具来观察和调试它们的行为。
+
+#### 查看 Agent 对话
+
+```bash
+# 查看特定 Agent 的完整对话历史
+openclaw agent logs architect --verbose
+
+# 实时追踪 Agent 间的通信
+openclaw agent trace --team "全栈开发团队" --follow
+
+# 查看 Agent 之间传递的消息
+openclaw agent messages --from developer --to reviewer
+```
+
+#### 调试 Agent 决策
+
+当某个 Agent 的输出不符合预期时，可以深入查看它的决策过程：
+
+```bash
+# 查看 Agent 的思考链路（Chain of Thought）
+openclaw agent debug developer --show-reasoning
+
+# 回放 Agent 的执行步骤
+openclaw agent replay tester --step-by-step
+
+# 在特定步骤暂停，手动干预
+openclaw agent run --breakpoint "reviewer.start"
+```
+
+#### 性能指标
+
+```bash
+# 查看各 Agent 的性能指标
+openclaw agent metrics
+
+# 输出示例：
+# Agent        | Tokens 消耗 | 耗时    | 任务完成率
+# -------------|------------|---------|----------
+# architect    | 12,450     | 45s     | 100%
+# developer    | 89,320     | 3m 20s  | 95%
+# tester       | 34,100     | 1m 15s  | 100%
+# reviewer     | 28,700     | 55s     | 100%
+```
+
+#### 成本追踪
+
+```bash
+# 查看每个 Agent 的 API 调用成本
+openclaw agent cost --team "全栈开发团队"
+
+# 设置团队总预算上限
+openclaw team budget --max 10.00 --currency USD
+
+# 设置单个 Agent 的 token 上限
+openclaw agent limit developer --max-tokens 200000
+```
+
+---
 
 ### 浏览器控制
 
@@ -78,66 +460,477 @@ openclaw browser setup
 openclaw chat --browser
 ```
 
-#### 基本操作
+#### 支持的浏览器与运行模式
+
+```yaml
+browser:
+  # 浏览器类型：chromium（默认）、firefox、webkit
+  type: chromium
+
+  # 运行模式
+  headless: true           # 无头模式（无 GUI，适合服务器）
+  # headless: false        # 有头模式（可以看到浏览器窗口）
+
+  # 视口配置
+  viewport:
+    width: 1920
+    height: 1080
+    device_scale_factor: 2  # 高分辨率屏幕
+
+  # 超时设置
+  timeout: 30000            # 页面加载超时 30 秒
+  navigation_timeout: 60000 # 导航超时 60 秒
+```
+
+#### 认证与 Cookie 管理
+
+很多自动化场景需要登录后操作，OpenClaw 提供了多种认证方式：
+
+```yaml
+browser:
+  auth:
+    # 方式一：保存登录状态
+    storage_state: "./auth/login-state.json"
+
+    # 方式二：自动登录
+    auto_login:
+      url: "https://app.example.com/login"
+      username_selector: "#email"
+      password_selector: "#password"
+      submit_selector: "#login-btn"
+      credentials:
+        username: "${ENV_USERNAME}"    # 从环境变量读取
+        password: "${ENV_PASSWORD}"
+
+  # Cookie 管理
+  cookies:
+    # 从文件导入 Cookie
+    import: "./cookies.json"
+    # 任务结束后导出 Cookie
+    export: true
+    export_path: "./cookies-updated.json"
+```
+
+保存和复用登录状态：
 
 ```bash
+# 手动登录并保存状态（会打开浏览器窗口）
+openclaw browser login --save-state ./auth/my-app.json
+
+# 后续使用已保存的登录状态
+openclaw chat --browser --auth ./auth/my-app.json
+```
+
+---
+
+### 浏览器操作详解
+
+OpenClaw 支持丰富的浏览器操作指令，以下是各类操作的详细示例。
+
+#### 页面导航
+
+```bash
+# 打开网页
 > 打开浏览器访问 https://github.com/trending
 
-> 在搜索框中输入 "OpenClaw"，然后点击搜索按钮
+# 前进和后退
+> 返回上一页
+> 前进到下一页
 
-> 截取当前页面的完整截图并保存
+# 在新标签页中打开
+> 在新标签页中打开 https://news.ycombinator.com
+
+# 切换标签页
+> 切换到第二个标签页
+
+# 等待页面完全加载
+> 访问 https://example.com 并等待所有网络请求完成
 ```
 
-OpenClaw 会像真人一样操作浏览器：移动鼠标、点击按钮、输入文字、滚动页面。
+#### 表单交互
 
-#### 实用场景
-
-**自动化表单填写**：
 ```bash
-> 打开公司的请假系统，帮我提交一个明天的年假申请，理由写"个人事务"
+# 输入文字
+> 在搜索框中输入 "OpenClaw"
+
+# 选择下拉选项
+> 在"城市"下拉框中选择"北京"
+
+# 勾选复选框
+> 勾选"我已阅读并同意用户协议"
+
+# 上传文件
+> 在文件上传区域上传 ./documents/report.pdf
+
+# 清空并重新输入
+> 清空用户名输入框，然后输入新的用户名 "testuser"
 ```
 
-**网页数据采集**：
+#### 点击与交互
+
 ```bash
-> 访问竞品官网的定价页面，提取所有套餐的价格和功能对比，整理成表格
+# 点击按钮
+> 点击"提交"按钮
+
+# 点击链接
+> 点击页面中包含"了解更多"文字的链接
+
+# 右键点击
+> 在图片上右键点击，选择"在新标签页中打开图片"
+
+# 悬停操作
+> 将鼠标移动到导航栏的"产品"菜单上，等待下拉菜单出现
 ```
 
-**自动化测试**：
+#### 截图与数据提取
+
 ```bash
-> 打开我们的 Web 应用 http://localhost:3000，执行以下测试流程：
-  1. 注册一个测试账号
-  2. 登录系统
-  3. 创建一个新的项目
-  4. 上传一个测试文件
-  5. 验证文件是否上传成功
+# 全页面截图
+> 截取当前页面的完整截图并保存到 ./screenshots/
+
+# 指定区域截图
+> 截取页面中定价表格区域的截图
+
+# 提取文本数据
+> 提取页面中所有商品的名称和价格，整理成表格
+
+# 提取表格数据
+> 读取页面中的数据表格，导出为 CSV 文件保存到 ./data/
+
+# 提取链接
+> 提取页面中所有指向 PDF 文件的下载链接
+```
+
+#### 弹窗处理与等待
+
+```bash
+# 处理确认对话框
+> 如果出现确认弹窗，点击"确定"
+
+# 处理登录弹窗
+> 在弹出的登录窗口中输入账号密码并登录
+
+# 等待特定元素出现
+> 等待页面中出现"加载完成"的文字后再继续
+
+# 等待元素消失
+> 等待加载动画消失后再截图
+
+# 滚动操作
+> 向下滚动到页面底部
+> 滚动到"评论区"部分
+```
+
+---
+
+### 浏览器自动化实战
+
+以下是三个完整的浏览器自动化场景，展示实际应用中的操作流程。
+
+#### 场景一：电商价格监控
+
+```bash
+> 执行电商价格监控任务：
+  1. 打开京东搜索"机械键盘"
+  2. 按销量排序
+  3. 提取前 20 个商品的名称、价格、店铺名、评价数量
+  4. 打开淘宝搜索同样的关键词
+  5. 提取前 20 个商品的相同信息
+  6. 将两个平台的数据合并，按价格排序
+  7. 生成对比表格保存为 CSV 文件
+  8. 标记出价格差异超过 20% 的同款商品
+```
+
+配合 Cron 可以实现自动化监控：
+
+```yaml
+cron_jobs:
+  price_monitor:
+    schedule: "0 10,16 * * *"   # 每天上午 10 点和下午 4 点执行
+    browser: true
+    task: |
+      1. 按照监控列表访问各电商平台
+      2. 提取目标商品的最新价格
+      3. 与昨日价格对比
+      4. 如果价格下降超过 10%，发送通知
+      5. 更新价格历史记录数据库
+```
+
+#### 场景二：社交媒体管理
+
+```bash
+> 执行社交媒体日常管理任务：
+  1. 打开微博后台，查看今日粉丝增长数据
+  2. 截图保存数据面板
+  3. 查看最新 10 条评论，筛选出需要回复的
+  4. 打开知乎创作者中心，查看文章阅读量排行
+  5. 提取本周各文章的阅读量、点赞数、收藏数
+  6. 汇总所有平台数据，生成一份社交媒体日报
+  7. 将日报保存为 PDF 发送到指定邮箱
+```
+
+社交媒体发布自动化：
+
+```yaml
+workflow:
+  name: "社交媒体内容发布"
+  browser: true
+  steps:
+    - name: "准备内容"
+      action: "从 ./content/posts/ 目录读取今日待发布的内容"
+    - name: "发布到微博"
+      action: |
+        1. 登录微博创作者后台
+        2. 创建新微博
+        3. 粘贴文案内容
+        4. 上传配图
+        5. 设置定时发布时间
+        6. 截图确认
+    - name: "发布到知乎"
+      action: |
+        1. 登录知乎
+        2. 创建新回答或文章
+        3. 粘贴内容并调整格式
+        4. 发布并截图确认
+    - name: "记录结果"
+      action: "将各平台发布结果汇总到日志文件"
+```
+
+#### 场景三：Web 应用自动化测试
+
+```bash
+> 对我们的 Web 应用 http://localhost:3000 执行完整的自动化测试：
+
+  注册流程测试：
+  1. 打开注册页面
+  2. 输入测试用户名 "test_user_001"
+  3. 输入测试邮箱 "test001@example.com"
+  4. 输入密码 "TestPass123!"
+  5. 点击注册按钮
+  6. 验证是否跳转到欢迎页面
+  7. 截图保存结果
+
+  登录流程测试：
+  1. 退出当前账号
+  2. 使用刚注册的账号登录
+  3. 验证登录成功
+  4. 截图保存结果
+
+  核心功能测试：
+  1. 创建一个新的项目
+  2. 上传一个测试文件
+  3. 验证文件是否上传成功
+  4. 删除测试项目
+  5. 验证删除成功
   6. 截图记录每一步的结果
+
+  生成测试报告：
+  1. 汇总所有测试结果（通过/失败）
+  2. 整理所有截图
+  3. 生成 HTML 格式的测试报告
 ```
+
+---
 
 ### 多 Agent + 浏览器的组合
 
-将两者结合，可以实现极其强大的自动化场景：
+将多 Agent 和浏览器控制结合在一起，可以实现极其强大的自动化场景。
+
+#### 场景一：竞品分析报告
 
 ```yaml
 workflow:
   name: "竞品分析报告"
   agents:
     researcher:
+      name: "调研员"
       task: "使用浏览器访问各竞品网站，收集产品信息"
       browser: true
+      model: gpt-4
+      skills: ["@search/web-researcher"]
     analyst:
+      name: "分析师"
       task: "分析收集到的数据，识别市场趋势"
+      model: gpt-4
+      skills: ["@data/csv-analyzer", "@data/chart-generator"]
     writer:
+      name: "报告撰写人"
       task: "撰写完整的竞品分析报告"
+      model: gpt-4
+      skills: ["@content/report-writer"]
+
   steps:
     - agent: researcher
-      action: "访问 5 个竞品网站，截图并提取关键信息"
+      action: |
+        1. 访问 5 个竞品的官方网站
+        2. 截取定价页面完整截图
+        3. 提取各产品的功能列表、价格方案、客户案例
+        4. 访问各竞品的社交媒体页面，记录粉丝数和互动量
+        5. 在应用商店查看用户评分和评价
+        6. 将所有数据整理为结构化 JSON 文件
     - agent: analyst
-      action: "对比分析数据，生成洞察"
+      action: |
+        1. 对比各竞品的功能覆盖率
+        2. 分析价格策略差异
+        3. 计算性价比评分
+        4. 生成功能对比矩阵图
+        5. 绘制价格趋势图
+        6. 识别市场空白点
       depends_on: researcher
     - agent: writer
-      action: "撰写报告并生成 PDF"
+      action: |
+        1. 撰写执行摘要
+        2. 编写详细的竞品对比分析
+        3. 整合图表和数据
+        4. 提出战略建议
+        5. 生成最终报告（Markdown + PDF）
       depends_on: analyst
 ```
+
+#### 场景二：招聘信息聚合
+
+```yaml
+workflow:
+  name: "招聘市场分析"
+  agents:
+    crawler:
+      name: "信息采集员"
+      browser: true
+      model: gpt-4
+    analyzer:
+      name: "薪资分析师"
+      model: gpt-4
+      skills: ["@data/csv-analyzer"]
+    advisor:
+      name: "职业顾问"
+      model: gpt-4
+
+  steps:
+    - agent: crawler
+      action: |
+        1. 访问主流招聘网站搜索"AI 工程师"岗位
+        2. 提取前 50 个岗位的公司名、薪资范围、技能要求、工作地点
+        3. 访问各公司的企业介绍页面获取公司规模信息
+        4. 将数据保存为结构化 CSV
+    - agent: analyzer
+      action: |
+        1. 按城市统计平均薪资
+        2. 统计最常见的技能要求 Top 10
+        3. 分析公司规模与薪资的相关性
+        4. 生成可视化图表
+      depends_on: crawler
+    - agent: advisor
+      action: |
+        1. 解读市场数据
+        2. 给出技能提升建议
+        3. 推荐匹配度最高的 10 个岗位
+        4. 撰写市场洞察报告
+      depends_on: analyzer
+```
+
+#### 场景三：客户反馈监控与响应
+
+```yaml
+workflow:
+  name: "客户反馈监控"
+  agents:
+    monitor:
+      name: "反馈监控员"
+      browser: true
+      model: gpt-4
+    classifier:
+      name: "问题分类员"
+      model: gpt-4
+    responder:
+      name: "客服回复员"
+      browser: true
+      model: gpt-4
+
+  steps:
+    - agent: monitor
+      action: |
+        1. 访问应用商店查看最新用户评价
+        2. 访问社交媒体搜索品牌相关提及
+        3. 检查客服邮箱中的新工单
+        4. 汇总所有渠道的反馈信息
+    - agent: classifier
+      action: |
+        1. 将反馈按类型分类（bug、功能需求、使用咨询、投诉）
+        2. 按紧急程度排序
+        3. 标记需要立即处理的高优先级问题
+      depends_on: monitor
+    - agent: responder
+      action: |
+        1. 为每条反馈生成个性化回复
+        2. 高优先级问题直接在对应平台回复
+        3. 将 bug 报告自动创建为 Issue
+        4. 生成每日反馈处理报告
+      depends_on: classifier
+```
+
+---
+
+### 性能优化与资源管理
+
+当同时运行多个 Agent 和浏览器实例时，合理的资源管理至关重要。
+
+#### 资源限制配置
+
+```yaml
+resources:
+  # 全局资源限制
+  max_concurrent_agents: 5     # 最多同时运行 5 个 Agent
+  max_browser_instances: 3     # 最多同时打开 3 个浏览器
+  max_total_tokens: 500000     # 总 token 上限
+  max_cost_per_run: 5.00       # 单次运行最大花费（美元）
+
+  # 浏览器资源管理
+  browser:
+    max_tabs_per_instance: 5   # 每个浏览器最多 5 个标签页
+    idle_timeout: 300          # 空闲 5 分钟自动关闭
+    cache_enabled: true        # 启用浏览器缓存
+    image_loading: false       # 关闭图片加载（加速采集任务）
+```
+
+#### 并行优化策略
+
+```yaml
+optimization:
+  # 并行执行无依赖关系的任务
+  parallel_execution: true
+
+  # Agent 模型降级策略：非关键任务使用轻量模型
+  model_fallback:
+    primary: gpt-4
+    secondary: gpt-3.5-turbo   # 简单子任务使用更快的模型
+    threshold: low_complexity   # 复杂度低的任务自动降级
+
+  # 缓存策略：相同请求直接使用缓存结果
+  caching:
+    enabled: true
+    ttl: 3600                  # 缓存有效期 1 小时
+    scope: team                # 团队级别共享缓存
+```
+
+#### 监控仪表盘
+
+```bash
+# 启动实时监控仪表盘
+openclaw monitor dashboard
+
+# 查看资源使用情况
+openclaw monitor resources
+
+# 输出示例：
+# CPU 使用率：45%
+# 内存使用：2.3 GB / 8 GB
+# 浏览器实例：2 / 3
+# 活跃 Agent：4 / 5
+# Token 消耗：123,450 / 500,000
+# 当前费用：$2.35 / $5.00
+```
+
+---
 
 ### 七天总结
 
@@ -154,5 +947,86 @@ workflow:
 | Day 7 | 高级玩法 | 多 Agent、浏览器控制 |
 
 你现在已经具备了驾驭 AI 助手的所有基础知识。但这只是开始——AI 的世界每天都在进化，持续学习才是保持竞争力的关键。
+
+#### 进阶学习路径
+
+完成七天训练营后，建议按以下路线继续深入：
+
+**第一阶段：巩固基础（1-2 周）**
+- 在日常工作中持续使用 OpenClaw，养成 AI 协作的习惯
+- 尝试将至少 3 个重复性工作改造为自动化任务
+- 在 ClawHub 中探索并安装与你工作领域相关的技能包
+
+**第二阶段：进阶实践（2-4 周）**
+- 设计并实现一个完整的多 Agent 工作流
+- 搭建一个浏览器自动化的数据采集管道
+- 将 OpenClaw 集成到你的团队工作流中（CI/CD、日报、监控）
+
+**第三阶段：高级玩法（1-2 月）**
+- 开发自定义 Skill 并发布到 ClawHub
+- 构建企业级的多 Agent 协作系统
+- 探索 OpenClaw API，开发自己的应用和集成
+
+**推荐资源：**
+- OpenClaw 官方文档：详细的 API 参考和配置说明
+- ClawHub 社区论坛：与其他用户交流经验和技巧
+- 精品课 Module 1-7：系统化的深度学习课程
+- OpenClaw GitHub：源代码和最新开发进展
+
+---
+
+### 动手练习
+
+以下三个练习帮助你巩固今天所学的内容。建议按顺序完成，每个练习大约需要 10-15 分钟。
+
+#### 练习一：构建你的第一个 Agent 团队
+
+创建一个包含 3 个 Agent 的"博客创作团队"，要求：
+
+1. 定义三个角色：选题策划、内容撰写、SEO 优化
+2. 为每个 Agent 选择合适的模型和技能
+3. 设计流水线式的协作流程
+4. 给团队一个具体任务运行一次，观察各 Agent 的输出
+
+```bash
+# 提示：从创建配置文件开始
+openclaw team create --interactive
+```
+
+验证标准：团队能够自动完成从选题到发布的完整流程，每个 Agent 的职责边界清晰。
+
+#### 练习二：浏览器自动化数据采集
+
+使用浏览器控制功能完成以下任务：
+
+1. 访问 GitHub Trending 页面
+2. 提取今日热门仓库的前 10 个项目信息（项目名、描述、星标数、语言）
+3. 将数据保存为 CSV 文件
+4. 对数据按星标数排序
+5. 为这个任务设置一个每日定时执行的 Cron
+
+```bash
+# 提示：先启动浏览器会话
+openclaw chat --browser
+```
+
+验证标准：成功生成包含 10 条记录的 CSV 文件，Cron 任务配置正确。
+
+#### 练习三：多 Agent + 浏览器组合实战
+
+设计一个"技术雷达"自动化流程，要求：
+
+1. 采集 Agent（带浏览器）：每周访问 Hacker News、GitHub Trending、Product Hunt，收集本周热门技术话题
+2. 分析 Agent：对收集的数据进行分类和趋势分析
+3. 报告 Agent：生成一份"本周技术雷达"报告，包含新兴技术、热门项目和值得关注的趋势
+4. 使用 Cron 设置为每周五下午自动执行
+
+```yaml
+# 提示：参考本课中的竞品分析案例来设计你的配置文件
+```
+
+验证标准：完整的工作流配置文件、合理的 Agent 分工、正确的 Cron 调度设置。
+
+---
 
 > 💡 **准备进阶？** Multi-Agent 架构设计 → 精品课 Module 7

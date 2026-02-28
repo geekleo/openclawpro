@@ -11,39 +11,161 @@ hook: "完整开发工作流视频 → 精品课 Module 3"
 
 前两天我们学会了安装 OpenClaw 和高效沟通的技巧。今天进入最激动人心的部分——让 AI 直接帮你操作文件和编写代码。这不再是简单的「复制粘贴」，而是真正的人机协作编程。
 
+想象一下小明的一天。作为一名全栈开发者，他需要完成这些任务：创建一个新的 API 模块、为已有代码补充单元测试、修复一个跨文件的 Bug、编写部署配置、更新项目文档。如果全靠手动完成，这些工作至少需要一整天。
+
+但有了 OpenClaw，小明的工作方式完全不同了：
+
+- 用一句话让 OpenClaw 读取相关源码，快速理解上下文
+- 描述需求后，OpenClaw 直接在项目目录中创建新文件
+- 指出 Bug 现象，OpenClaw 自动定位问题文件并修复
+- 一条指令生成 Dockerfile、nginx.conf 和 CI/CD 配置
+- 代码写完后，让 OpenClaw 自动补全测试和文档
+
+原本一天的工作量，两个小时就完成了。这就是文件操作和代码生成的威力。让我们一步步掌握这些能力。
+
 ### 文件操作基础
 
 OpenClaw 可以直接与你的文件系统交互，包括读取、创建、编辑和管理文件。这是它区别于普通聊天机器人的核心能力之一。
 
-#### 读取文件
+#### 读取单个文件
+
+最基本的操作是让 OpenClaw 读取并理解一个文件的内容：
 
 ```bash
-# 在对话中直接引用文件
+# 读取并解释代码
 > 请读取 ./src/index.ts 并解释这段代码的功能
 
-# 批量读取
-> 请读取 ./src 目录下所有的 .ts 文件，给我一个项目结构概览
+# 读取并分析问题
+> 请读取 ./src/services/payment.ts，这个文件最近频繁出错，帮我找出潜在的问题
+
+# 读取并提出优化建议
+> 请读取 ./src/utils/helpers.ts，分析哪些函数可以优化性能
 ```
 
 OpenClaw 会自动解析文件内容，理解代码逻辑，并给出清晰的解释。
 
-#### 创建和编辑文件
+#### 批量读取
+
+当你需要了解整个模块或项目的全貌时，批量读取非常有用：
 
 ```bash
-# 创建新文件
-> 请在 ./src/utils/ 目录下创建一个 date-helper.ts 文件，
-  包含日期格式化、时间差计算等常用工具函数
+# 读取整个目录
+> 请读取 ./src/controllers/ 目录下所有的 .ts 文件，给我一个功能概览
 
-# 编辑现有文件
-> 请在 ./src/api/user.ts 中添加一个用户搜索接口，
-  支持按用户名和邮箱模糊搜索
+# 读取多个相关文件
+> 请同时读取 ./src/models/user.ts、./src/services/userService.ts 和
+  ./src/controllers/userController.ts，分析它们之间的调用关系
+
+# 读取并对比
+> 请读取 ./src/api/v1/ 和 ./src/api/v2/ 目录，对比两个版本的接口差异
+```
+
+#### 目录列表与文件搜索
+
+在大型项目中，先了解项目结构再动手修改是个好习惯：
+
+```bash
+# 查看项目结构
+> 列出 ./src 目录的完整文件树结构
+
+# 按模式搜索文件
+> 找出项目中所有包含 "Controller" 的文件
+
+# 搜索特定内容
+> 在整个 ./src 目录中搜索所有使用了 deprecated API 的文件
+```
+
+#### 读取非代码文件
+
+OpenClaw 不仅能处理代码，还能理解各种格式的文件：
+
+```bash
+# CSV 数据文件
+> 请读取 ./data/users.csv，统计各个地区的用户数量
+
+# JSON 配置
+> 请读取 ./package.json，列出所有依赖项并检查是否有已知的安全漏洞版本
+
+# YAML 配置
+> 请读取 ./docker-compose.yml，解释每个服务的作用和它们之间的依赖关系
+
+# Markdown 文档
+> 请读取 ./docs/api.md，检查文档中描述的接口和实际代码是否一致
+```
+
+### 文件创建与编辑
+
+读取文件只是起点，真正的生产力来自于让 OpenClaw 帮你创建和编辑文件。
+
+#### 创建新文件
+
+```bash
+# 创建工具函数文件
+> 请在 ./src/utils/ 目录下创建一个 date-helper.ts 文件，
+  包含日期格式化、时间差计算、时区转换等常用工具函数
+
+# 使用特定模板创建
+> 请按照项目中已有的 Controller 风格（参考 ./src/controllers/userController.ts），
+  创建一个 productController.ts，包含商品的 CRUD 操作
 ```
 
 OpenClaw 不仅会生成代码，还会自动处理导入语句、类型定义等细节，确保代码可以直接运行。
 
+#### 编辑特定行或函数
+
+有时你不需要重写整个文件，只需要修改其中的一部分：
+
+```bash
+# 修改特定函数
+> 请将 ./src/services/orderService.ts 中的 calculateTotal 函数改为
+  支持多币种计算，保留原有的人民币计算逻辑
+
+# 添加新方法
+> 请在 ./src/models/user.ts 的 User 类中添加一个 toPublicProfile 方法，
+  返回不包含密码和手机号等敏感信息的用户对象
+
+# 修复特定行
+> ./src/utils/validator.ts 的第 42 行正则表达式有误，
+  请修复为支持中国大陆和港澳台手机号的格式
+```
+
+#### 批量文件操作
+
+当你需要对多个文件进行相似的修改时，批量操作可以大大提高效率：
+
+```bash
+# 批量添加头部注释
+> 请为 ./src/controllers/ 目录下的所有 .ts 文件添加标准的文件头注释，
+  包含文件描述、作者和创建日期
+
+# 批量重构
+> 项目从 moment.js 迁移到 dayjs，请找出所有引用了 moment 的文件，
+  逐一替换为等效的 dayjs 调用
+
+# 批量更新导入路径
+> 我将 ./src/helpers/ 重命名为了 ./src/utils/，
+  请更新项目中所有引用旧路径的 import 语句
+```
+
+#### 创建项目脚手架
+
+OpenClaw 可以一次性生成完整的项目骨架：
+
+```bash
+# 生成项目脚手架
+> 请在 ./new-service/ 目录下创建一个 Express + TypeScript 项目脚手架，包含：
+  - 标准的目录结构（controllers, services, models, routes, middleware）
+  - TypeScript 和 ESLint 配置
+  - Jest 测试环境配置
+  - 基础的 health check 接口
+  - 环境变量加载和验证
+```
+
 ### 代码生成实战
 
-让我们通过一个实际案例来体验代码生成的强大之处。假设你要创建一个简单的 REST API：
+让我们通过一个完整的案例来体验代码生成的强大之处。假设你要创建一个用户管理的 REST API。
+
+#### 第一步：描述需求并生成基础代码
 
 ```bash
 > 请帮我创建一个 Express.js 的 REST API 项目，包含以下功能：
@@ -75,43 +197,434 @@ my-api/
 └── tsconfig.json
 ```
 
+来看看核心文件的内容。首先是控制器：
+
+```typescript
+// src/controllers/userController.ts
+import { Request, Response, NextFunction } from 'express';
+import { UserService } from '../services/userService';
+
+export class UserController {
+  private userService: UserService;
+
+  constructor() {
+    this.userService = new UserService();
+  }
+
+  async getAll(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { page = 1, limit = 20 } = req.query;
+      const users = await this.userService.findAll(
+        Number(page),
+        Number(limit)
+      );
+      res.json({ success: true, data: users });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getById(req: Request, res: Response, next: NextFunction) {
+    try {
+      const user = await this.userService.findById(req.params.id);
+      if (!user) {
+        return res.status(404).json({ success: false, message: '用户不存在' });
+      }
+      res.json({ success: true, data: user });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async create(req: Request, res: Response, next: NextFunction) {
+    try {
+      const user = await this.userService.create(req.body);
+      res.status(201).json({ success: true, data: user });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async update(req: Request, res: Response, next: NextFunction) {
+    try {
+      const user = await this.userService.update(req.params.id, req.body);
+      res.json({ success: true, data: user });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async delete(req: Request, res: Response, next: NextFunction) {
+    try {
+      await this.userService.delete(req.params.id);
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+```
+
+接下来是认证中间件：
+
+```typescript
+// src/middleware/auth.ts
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+interface AuthRequest extends Request {
+  userId?: string;
+}
+
+export function authMiddleware(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      success: false,
+      message: '未提供有效的认证令牌',
+    });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      userId: string;
+    };
+    req.userId = decoded.userId;
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: '认证令牌无效或已过期',
+    });
+  }
+}
+```
+
+以及路由配置：
+
+```typescript
+// src/routes/userRoutes.ts
+import { Router } from 'express';
+import { UserController } from '../controllers/userController';
+import { authMiddleware } from '../middleware/auth';
+import { validateCreateUser, validateUpdateUser } from '../validators/userValidator';
+
+const router = Router();
+const controller = new UserController();
+
+router.get('/', authMiddleware, (req, res, next) => controller.getAll(req, res, next));
+router.get('/:id', authMiddleware, (req, res, next) => controller.getById(req, res, next));
+router.post('/', authMiddleware, validateCreateUser, (req, res, next) => controller.create(req, res, next));
+router.put('/:id', authMiddleware, validateUpdateUser, (req, res, next) => controller.update(req, res, next));
+router.delete('/:id', authMiddleware, (req, res, next) => controller.delete(req, res, next));
+
+export default router;
+```
+
+#### 第二步：迭代优化
+
+基础代码生成后，你可以继续对话，逐步完善：
+
+```bash
+> 控制器的代码看起来不错，但我想加上以下改进：
+  1. getAll 接口增加按用户名和邮箱的模糊搜索功能
+  2. 所有接口增加操作日志记录
+  3. delete 接口改为软删除
+```
+
+OpenClaw 会在已有代码的基础上进行精确修改，而不是重新生成整个文件。
+
+#### 第三步：增量添加功能
+
+随着项目发展，你可以不断追加新功能：
+
+```bash
+> 项目需要增加以下功能：
+  1. 添加一个 roleController.ts 实现角色管理
+  2. 在 auth 中间件中加入基于角色的权限控制（RBAC）
+  3. 添加请求频率限制中间件，每个 IP 每分钟最多 60 次请求
+```
+
+这种渐进式开发的方式非常符合实际工作中的需求演进过程。你不需要一开始就把所有需求想清楚，可以边做边调整。
+
 ### 代码质量保障
 
-生成代码只是第一步，OpenClaw 还能帮你保障代码质量：
+生成代码只是第一步，OpenClaw 还能帮你全方位保障代码质量。
 
-**单元测试生成**：
+#### 单元测试生成
+
 ```bash
-> 请为 ./src/utils/date-helper.ts 生成 Jest 单元测试，覆盖所有边界情况
+> 请为 ./src/controllers/userController.ts 生成完整的 Jest 单元测试，要求：
+  1. Mock 掉 UserService 的所有方法
+  2. 覆盖正常流程和异常流程
+  3. 测试所有 HTTP 状态码的返回场景
+  4. 覆盖边界情况，如空参数、无效 ID 格式
 ```
 
-**代码重构**：
+#### 集成测试生成
+
 ```bash
+> 请为用户模块生成集成测试，使用 supertest 库：
+  1. 测试完整的注册 -> 登录 -> 获取用户信息流程
+  2. 测试未认证状态下访问受保护接口的情况
+  3. 使用测试数据库，每次测试前清空数据
+```
+
+#### 端到端测试
+
+```bash
+> 请基于 Playwright 生成用户管理页面的 E2E 测试，覆盖：
+  1. 用户列表的加载和分页
+  2. 新建用户表单的填写和提交
+  3. 编辑用户信息
+  4. 删除用户的确认弹窗交互
+```
+
+#### 代码审查
+
+OpenClaw 可以充当你的代码审查员：
+
+```bash
+> 请审查 ./src/services/ 目录下的所有文件，重点检查：
+  1. 是否存在未处理的异常
+  2. 是否有 SQL 注入或 XSS 风险
+  3. 是否有 N+1 查询问题
+  4. 是否遵循了 SOLID 原则
+```
+
+#### 代码重构
+
+```bash
+# 提取公共逻辑
+> ./src/controllers/ 下的多个 Controller 都有相似的分页和错误处理逻辑，
+  请提取一个 BaseController 基类，减少重复代码
+
+# 改写代码风格
 > 请将 ./src/services/orderService.ts 中的回调地狱改写为 async/await 风格
+
+# 拆分大文件
+> ./src/utils/helpers.ts 已经超过 500 行了，请按功能拆分成
+  string-utils.ts、number-utils.ts、date-utils.ts 三个文件，
+  并更新所有引用
 ```
 
-**Bug 定位**：
+#### Lint 和类型检查集成
+
 ```bash
-> 运行测试后发现 userController.test.ts 的第 45 行失败了，请帮我分析原因并修复
+# 修复 lint 问题
+> 请运行 ESLint 检查 ./src 目录，自动修复所有可以修复的问题，
+  对于不能自动修复的问题，列出来并给出手动修复建议
+
+# 修复类型错误
+> TypeScript 编译报了 15 个类型错误，请逐一分析并修复这些类型问题
 ```
+
+### Git 集成
+
+OpenClaw 可以与 Git 深度配合，让版本管理更加轻松。
+
+#### 生成 Commit 信息
+
+写好代码后，让 OpenClaw 帮你生成规范的提交信息：
+
+```bash
+> 请查看当前 git diff，生成一条符合 Conventional Commits 规范的提交信息
+```
+
+OpenClaw 会分析你的代码变更，生成类似这样的提交信息：
+
+```
+feat(user): add fuzzy search and soft delete to user module
+
+- Add username and email fuzzy search in getAll endpoint
+- Implement soft delete with deletedAt timestamp
+- Add operation logging middleware for audit trail
+```
+
+#### 审查 Diff
+
+在提交前，让 OpenClaw 帮你审查变更：
+
+```bash
+> 请查看当前所有未提交的修改（git diff），检查是否有以下问题：
+  1. 不小心提交的调试代码（console.log 等）
+  2. 硬编码的密钥或敏感信息
+  3. 遗漏的类型定义
+  4. 不一致的代码风格
+```
+
+#### 创建 Pull Request
+
+```bash
+> 请基于当前分支与 main 分支的差异，帮我生成一个 Pull Request 描述，包含：
+  1. 变更概述
+  2. 主要改动点列表
+  3. 测试说明
+  4. 是否有破坏性变更的说明
+```
+
+#### 解决合并冲突
+
+合并冲突是开发中最让人头疼的事情之一，OpenClaw 可以帮你分析和解决：
+
+```bash
+> 当前有合并冲突，请读取所有冲突文件，分析双方的改动意图，
+  给出合理的合并方案。优先保留 main 分支的接口兼容性，
+  同时合入 feature 分支的新功能。
+```
+
+### 项目脚手架
+
+除了在已有项目中工作，OpenClaw 还可以帮你从零开始搭建各种技术栈的项目。
+
+#### React 前端项目
+
+```bash
+> 请创建一个 React + TypeScript 前端项目脚手架，要求：
+  - 使用 Vite 作为构建工具
+  - 状态管理使用 Zustand
+  - 路由使用 React Router v6
+  - 样式方案使用 Tailwind CSS
+  - 包含基础的 Layout、Auth、Dashboard 页面
+  - 配置好 ESLint 和 Prettier
+```
+
+#### Express 后端项目
+
+```bash
+> 请创建一个 Express + TypeScript 后端项目，要求：
+  - 分层架构：controller -> service -> repository
+  - 使用 Prisma 作为 ORM
+  - 集成 Swagger 自动生成 API 文档
+  - 包含 Docker 开发环境配置
+  - 配置好日志系统（使用 Winston）
+```
+
+#### Python Flask 项目
+
+```bash
+> 请创建一个 Python Flask REST API 项目，要求：
+  - 使用 Flask-RESTful 和 Flask-SQLAlchemy
+  - 包含 JWT 认证
+  - 使用 Marshmallow 做数据序列化和验证
+  - 配置好 pytest 测试框架
+  - 包含 requirements.txt 和 Dockerfile
+```
+
+OpenClaw 会根据每种技术栈的最佳实践生成完整的项目骨架，包括目录结构、配置文件和示例代码，让你可以直接开始业务开发。
 
 ### 文件管理进阶
 
-除了代码文件，OpenClaw 还能帮你管理各类文件：
+除了代码文件，OpenClaw 还能帮你管理项目中的各类配置和文档。
 
-- **配置文件**：生成 Nginx、Docker、CI/CD 配置
-- **文档生成**：根据代码自动生成 API 文档
-- **数据处理**：读取 CSV/JSON 文件并进行数据分析
+#### 配置文件生成
 
 ```bash
-> 请读取 ./data/sales.csv，统计每个月的销售总额，并生成一个汇总表格
+# Docker 多阶段构建配置
+> 请为当前 Node.js 项目生成一个优化的 Dockerfile，使用多阶段构建，
+  最终镜像体积要尽可能小
+
+# Nginx 反向代理配置
+> 请生成 Nginx 配置文件，要求：
+  - 前端静态文件部署在 /var/www/html
+  - API 请求代理到 localhost:3000
+  - 配置 gzip 压缩和浏览器缓存
+  - 配置 HTTPS（使用 Let's Encrypt 证书路径）
+
+# CI/CD 流水线
+> 请生成 GitHub Actions 的 CI/CD 配置文件，包含：
+  - 代码检查（lint + type check）
+  - 运行测试并上传覆盖率报告
+  - 构建 Docker 镜像并推送到 Docker Hub
+  - 自动部署到测试环境
 ```
+
+#### 文档生成
+
+```bash
+# API 文档
+> 请读取 ./src/routes/ 下的所有路由文件，自动生成 RESTful API 文档，
+  包含接口地址、请求方法、参数说明、返回示例
+
+# 数据库文档
+> 请读取 ./prisma/schema.prisma，生成数据表结构文档，
+  包含表关系图的 Mermaid 代码
+
+# 变更日志
+> 请基于最近 20 次 git commit 记录，生成本次发版的 CHANGELOG
+```
+
+#### 数据文件处理
+
+```bash
+# CSV 分析
+> 请读取 ./data/sales.csv，统计每个月的销售总额，并生成一个汇总表格
+
+# JSON 转换
+> 请读取 ./data/legacy-config.json，将其转换为等效的 YAML 格式，
+  并添加中文注释
+
+# 环境配置
+> 请基于 ./env.example 文件，为开发、测试、生产三个环境
+  分别生成 .env.development、.env.test、.env.production，
+  并填入合理的默认值
+```
+
+### 安全注意事项
+
+在使用 OpenClaw 进行文件操作时，有几点安全事项需要注意：
+
+1. **权限控制**：OpenClaw 只能操作你授权范围内的文件。首次访问新目录时，它会请求你的确认。不要随意授权对系统关键目录（如 /etc、/usr）的写入权限。
+
+2. **敏感文件保护**：避免让 OpenClaw 读取或生成包含真实密钥、密码的文件。使用环境变量和占位符来代替实际的敏感值。生成的 .env 文件中应该只包含示例值。
+
+3. **操作确认**：对于删除文件、覆盖已有文件等不可逆操作，OpenClaw 会要求你确认。请仔细阅读确认提示，不要盲目同意。
+
+4. **版本控制**：在让 OpenClaw 进行大规模文件修改前，建议先用 git 提交当前的工作进度。这样即使修改结果不满意，也可以轻松回退。
+
+5. **代码审查**：OpenClaw 生成的代码在上线前务必经过人工审查，特别是涉及安全、支付、权限等核心逻辑的部分。
+
+### 动手练习
+
+以下三个练习帮助你巩固今天学到的内容。建议在你自己的项目目录中实际操作：
+
+**练习一：文件探索**
+
+选择你当前正在开发的一个项目，让 OpenClaw 完成以下任务：
+1. 列出项目的完整目录结构
+2. 读取项目的入口文件，生成一份架构概览
+3. 找出项目中最大的三个文件，分析是否需要拆分
+
+**练习二：代码生成与测试**
+
+让 OpenClaw 在你的项目中完成以下操作：
+1. 创建一个新的工具函数模块，至少包含 5 个函数
+2. 为这个模块生成完整的单元测试
+3. 运行测试并修复失败的用例
+
+**练习三：Git 工作流**
+
+完成以上修改后，练习 Git 集成功能：
+1. 让 OpenClaw 查看当前的 git diff
+2. 让它生成符合 Conventional Commits 规范的提交信息
+3. 让它帮你审查这次变更中是否有潜在问题
 
 ### 今日小结
 
 今天你学到了如何利用 OpenClaw 进行文件操作和代码生成。核心要点：
 
-1. OpenClaw 可以直接读写你的文件系统
-2. 代码生成不只是写代码，还包括测试、重构和调试
+1. OpenClaw 可以直接读写你的文件系统，支持代码、配置、文档、数据等各类文件
+2. 代码生成不只是写代码，还包括测试、重构、审查和调试
 3. 给出越详细的需求描述，生成的代码质量越高
+4. 善用 Git 集成功能，让版本管理更加轻松
+5. 渐进式开发是最佳实践——先生成基础版本，再逐步迭代完善
+6. 安全意识不能少——敏感信息保护和代码审查是必要环节
 
 > 💡 **想看完整演示？** 完整开发工作流视频 → 精品课 Module 3
