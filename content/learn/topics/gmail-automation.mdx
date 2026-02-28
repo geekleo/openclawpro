@@ -1,6 +1,6 @@
 ---
 title: "Gmail 自动摘要与智能跟进"
-description: "配置 OpenClaw Gmail Skill 实现邮件自动摘要、智能分类、优先级标记和跟进提醒，每天节省 1.5 小时处理邮件"
+description: "详解 Google API 与 OAuth 配置、Gmail Skill 安装、自动邮件摘要（每日/每周）、智能分类与优先级标记、自动回复模板、跟进提醒机制、附件处理以及隐私安全最佳实践，附完整 YAML 配置示例"
 category: "效率工具篇"
 tags: ["Gmail", "邮件", "自动摘要", "效率"]
 date: "2026-02-09"
@@ -8,309 +8,861 @@ date: "2026-02-09"
 
 ## 前言
 
-每天面对 100+ 封邮件，重要信息容易被淹没。OpenClaw 的 Gmail Skill 可以自动摘要邮件、智能分类、标记优先级，并在需要跟进时推送提醒，让你不再错过任何重要邮件。
+邮件依然是商务沟通的核心渠道。对于每天收到 50-200 封邮件的职场人来说，筛选重要信息、及时回复和跟进是巨大的时间消耗。据统计，职场人平均每天花费 2.6 小时处理邮件，其中大量时间花在了低价值的筛选和分类上。
 
-## 一、Google API 配置
+通过将 OpenClaw 与 Gmail 集成，你可以实现邮件的自动摘要、智能分类、优先级标记、自动回复和跟进提醒，将每天的邮件处理时间从 2 小时以上压缩到 15 分钟。
 
-### 1. 创建 Google Cloud 项目
+## 一、Google API 与 OAuth 配置
+
+### 1.1 创建 Google Cloud 项目
 
 1. 访问 [Google Cloud Console](https://console.cloud.google.com)
-2. 创建新项目：「OpenClaw Mail Assistant」
-3. 启用 Gmail API：
-   - 导航到「API 和服务」→「库」
-   - 搜索「Gmail API」并启用
+2. 点击顶部导航栏的项目选择器，选择「新建项目」
+3. 项目名称：`OpenClaw Mail Assistant`
+4. 创建完成后，确保在该项目下进行后续操作
 
-### 2. 配置 OAuth 2.0
+### 1.2 启用 Gmail API
 
-```bash
-# 创建 OAuth 客户端凭据
-# 1. 进入「凭据」页面
-# 2. 创建 OAuth 客户端 ID
-# 3. 应用类型选择「桌面应用」
-# 4. 下载 credentials.json
+1. 在左侧菜单中选择「API 和服务」→「库」
+2. 搜索「Gmail API」并点击进入
+3. 点击「启用」按钮
+4. 同时建议启用「Google Calendar API」（后续日历集成会用到）
+
+### 1.3 配置 OAuth 同意屏幕
+
+1. 进入「API 和服务」→「OAuth 同意屏幕」
+2. 选择用户类型：
+   - **外部**：适合个人 Gmail 用户
+   - **内部**：适合 Google Workspace 组织内部
+3. 填写应用信息：
+   - 应用名称：`OpenClaw Mail Assistant`
+   - 用户支持邮箱：你的邮箱
+   - 开发者联系信息：你的邮箱
+4. 添加 Scopes（权限范围）：
+
+```
+https://www.googleapis.com/auth/gmail.readonly      # 读取邮件
+https://www.googleapis.com/auth/gmail.send           # 发送邮件
+https://www.googleapis.com/auth/gmail.modify         # 修改标签等
+https://www.googleapis.com/auth/gmail.labels          # 管理标签
 ```
 
-### 3. 授权流程
+### 1.4 创建 OAuth 客户端凭据
+
+1. 进入「API 和服务」→「凭据」
+2. 点击「创建凭据」→「OAuth 客户端 ID」
+3. 应用类型选择「桌面应用」
+4. 名称：`OpenClaw Desktop Client`
+5. 创建完成后，下载 JSON 文件并保存为 `credentials.json`
+
+### 1.5 完成 OAuth 授权
 
 ```bash
 # 安装 Gmail Skill
 openclaw skill install gmail
 
-# 配置 OAuth
+# 配置 OAuth 凭据
 openclaw gmail auth --credentials ./credentials.json
 
-# 浏览器会自动打开授权页面
-# 授权后 token 会自动保存到 ~/.openclaw/skills/gmail/token.json
+# 浏览器会自动打开 Google 授权页面
+# 登录你的 Gmail 账号并授权
+# 授权完成后 token 会自动保存
 ```
 
-## 二、基础配置
-
-```yaml
-# ~/.openclaw/skills/gmail/config.yaml
-gmail:
-  auth:
-    credentials_path: "${HOME}/.openclaw/skills/gmail/credentials.json"
-    token_path: "${HOME}/.openclaw/skills/gmail/token.json"
-
-  # 邮件检查频率
-  check_interval: "5m"
-
-  # 自动摘要配置
-  summary:
-    enabled: true
-    max_length: 200  # 摘要最大字数
-    language: "zh-CN"
-    include_action_items: true
-
-  # 分类规则
-  classification:
-    categories:
-      - name: "紧急"
-        rules: ["urgent", "ASAP", "紧急", "请立即"]
-        priority: 1
-      - name: "需要回复"
-        rules: ["please reply", "请回复", "请确认", "what do you think"]
-        priority: 2
-      - name: "FYI"
-        rules: ["FYI", "供参考", "周知"]
-        priority: 3
-      - name: "订阅/通知"
-        rules: ["unsubscribe", "newsletter", "notification"]
-        priority: 4
-
-  # 跟进提醒
-  follow_up:
-    enabled: true
-    default_remind_after: "24h"
-    channels: ["telegram"]
-```
-
-## 三、自动邮件摘要
-
-### 每日摘要
-
-```yaml
-name: daily_email_summary
-schedule: "0 9 * * 1-5"  # 工作日早上 9 点
-steps:
-  - name: fetch_emails
-    action: gmail.fetch
-    params:
-      query: "is:unread after:{{yesterday}}"
-      max_results: 50
-
-  - name: classify
-    action: ai.classify
-    params:
-      items: "{{emails}}"
-      categories: ["紧急", "需要回复", "FYI", "订阅通知"]
-
-  - name: summarize
-    action: ai.summarize
-    prompt: |
-      将以下邮件按优先级分类并生成中文摘要：
-
-      {{classified_emails}}
-
-      输出格式：
-      🔴 紧急（需要立即处理）
-      - [发件人] 主题：摘要（1-2句话）
-
-      🟡 需要回复
-      - [发件人] 主题：摘要 + 建议回复要点
-
-      🟢 FYI（仅需了解）
-      - [发件人] 主题：一句话摘要
-
-      📊 数据概览：共 X 封新邮件，X 封需要处理
-
-  - name: push
-    action: telegram.send
-    params:
-      message: "📧 今日邮件摘要\n\n{{summary}}"
-```
-
-### 每周邮件报告
-
-```yaml
-name: weekly_email_report
-schedule: "0 17 * * 5"
-steps:
-  - name: fetch_week_emails
-    action: gmail.fetch
-    params:
-      query: "after:{{week_start}} before:{{week_end}}"
-
-  - name: analyze
-    action: ai.analyze
-    prompt: |
-      分析本周邮件数据：
-      - 总收件数
-      - 按发件人分组的统计
-      - 高频主题/关键词
-      - 未回复邮件列表
-      - 平均回复时间
-
-  - name: report
-    action: notion.create_page
-    params:
-      database_id: "${EMAIL_REPORT_DB}"
-      content: "{{analysis}}"
-```
-
-## 四、智能分类与优先级
-
-### AI 驱动的智能分类
-
-```yaml
-name: smart_classify
-trigger: gmail.new_email
-steps:
-  - name: analyze
-    action: ai.classify
-    params:
-      content: "{{email.subject}} {{email.snippet}}"
-      prompt: |
-        分析这封邮件的紧急程度和类型：
-        发件人: {{email.from}}
-        主题: {{email.subject}}
-        摘要: {{email.snippet}}
-
-        返回 JSON：
-        {
-          "priority": "high/medium/low",
-          "category": "类别",
-          "needs_reply": true/false,
-          "reply_deadline": "建议回复时间",
-          "action_items": ["待办事项列表"]
-        }
-
-  - name: label
-    action: gmail.add_label
-    params:
-      message_id: "{{email.id}}"
-      labels: ["{{classification.priority}}", "{{classification.category}}"]
-
-  - name: alert_if_urgent
-    condition: "{{classification.priority}} == 'high'"
-    action: telegram.send
-    params:
-      message: "🔴 紧急邮件！\n发件人：{{email.from}}\n主题：{{email.subject}}\n建议操作：{{classification.action_items}}"
-```
-
-## 五、自动回复模板
-
-```yaml
-auto_reply:
-  templates:
-    meeting_confirm:
-      trigger: "会议邀请|meeting invite|calendar"
-      reply: |
-        收到会议邀请，已确认参加。
-        如有议程或预读材料，请提前发送。谢谢！
-
-    receipt_acknowledge:
-      trigger: "请确认收到|please acknowledge"
-      reply: |
-        已收到，感谢通知。
-        如有需要进一步沟通的内容，我会尽快回复。
-
-    out_of_office:
-      enabled: false
-      reply: |
-        感谢来信。我目前不在办公室，将于 {{return_date}} 回来。
-        紧急事务请联系 {{backup_contact}}。
-```
-
-## 六、跟进提醒配置
-
-```yaml
-name: follow_up_reminder
-schedule: "0 10,15 * * 1-5"  # 每天 10:00 和 15:00 检查
-steps:
-  - name: check_unreplied
-    action: gmail.fetch
-    params:
-      query: "is:sent after:{{2_days_ago}} -has:reply"
-
-  - name: filter
-    action: filter
-    params:
-      condition: "{{email.importance}} >= medium"
-
-  - name: remind
-    action: telegram.send
-    params:
-      message: |
-        ⏰ 跟进提醒
-        以下邮件已发送超过 48 小时未收到回复：
-        {{#each unreplied_emails}}
-        - 收件人：{{to}} | 主题：{{subject}} | 发送时间：{{sent_at}}
-        {{/each}}
-
-        建议操作：再次跟进或电话联系
-```
-
-## 七、附件自动处理
-
-```yaml
-name: attachment_handler
-trigger: gmail.new_email
-condition: "{{email.has_attachments}}"
-steps:
-  - name: classify_attachment
-    action: ai.classify
-    params:
-      filenames: "{{email.attachment_names}}"
-      categories: ["发票/收据", "合同", "报告", "图片", "其他"]
-
-  - name: save_invoice
-    condition: "{{category}} == '发票/收据'"
-    action: notion.create_page
-    params:
-      database_id: "${INVOICE_DB}"
-      properties:
-        来源: "{{email.from}}"
-        日期: "{{email.date}}"
-      attachments: "{{email.attachments}}"
-
-  - name: save_to_drive
-    action: google_drive.upload
-    params:
-      folder: "邮件附件/{{category}}/{{year}}/{{month}}"
-      files: "{{email.attachments}}"
-```
-
-## 八、隐私与安全
-
-### 安全最佳实践
-
-1. **最小权限原则**：OAuth 授权时只勾选必要的 Gmail 权限范围
-2. **Token 保护**：`token.json` 文件权限设为 600，不要提交到版本控制
-3. **定期轮换**：每 90 天刷新 OAuth Token
-4. **审计日志**：开启操作日志记录所有邮件处理行为
+授权完成后，token 文件保存在 `~/.openclaw/skills/gmail/token.json`，请确保安全：
 
 ```bash
-# 设置 token 文件权限
-chmod 600 ~/.openclaw/skills/gmail/token.json
+# 设置文件权限
 chmod 600 ~/.openclaw/skills/gmail/credentials.json
+chmod 600 ~/.openclaw/skills/gmail/token.json
 
 # 添加到 .gitignore
 echo "credentials.json" >> .gitignore
 echo "token.json" >> .gitignore
 ```
 
-### 数据处理原则
+## 二、Gmail Skill 完整配置
 
-- 邮件内容只在本地处理，不上传到第三方服务器
-- AI 模型处理使用 API 调用，遵循模型提供商的数据处理政策
-- 敏感邮件（包含密码、个人信息等）自动跳过 AI 处理
+```yaml
+# config/skills/gmail.yaml
+# Gmail 集成完整配置
 
-## 效果数据
+skills:
+  gmail:
+    enabled: true
+    config:
+      # === OAuth 凭证 ===
+      auth:
+        credentials_path: "${HOME}/.openclaw/skills/gmail/credentials.json"
+        token_path: "${HOME}/.openclaw/skills/gmail/token.json"
+        scopes:
+          - "https://www.googleapis.com/auth/gmail.readonly"
+          - "https://www.googleapis.com/auth/gmail.send"
+          - "https://www.googleapis.com/auth/gmail.modify"
+          - "https://www.googleapis.com/auth/gmail.labels"
 
-| 指标 | 使用前 | 使用后 |
-|------|--------|--------|
-| 日均处理邮件时间 | 90 分钟 | 15 分钟 |
-| 重要邮件遗漏率 | 15% | 0% |
-| 平均回复响应时间 | 4 小时 | 30 分钟 |
-| 跟进遗漏率 | 25% | 2% |
+      # === 邮件检查 ===
+      check:
+        interval: "5m"          # 每 5 分钟检查一次新邮件
+        max_results: 50         # 每次最多处理 50 封
+        # 忽略的邮件（不进行 AI 处理）
+        ignore:
+          labels: ["SPAM", "TRASH", "PROMOTIONS"]
+          senders: ["noreply@*", "no-reply@*"]
+
+      # === 自动摘要 ===
+      summary:
+        enabled: true
+        max_length: 200         # 每封邮件摘要最大字数
+        language: "zh-CN"
+        include_action_items: true  # 提取待办事项
+        include_deadlines: true     # 提取截止时间
+
+      # === 智能分类 ===
+      classification:
+        enabled: true
+        categories:
+          - name: "紧急"
+            rules:
+              keywords: ["urgent", "ASAP", "紧急", "请立即", "critical"]
+              sender_vip: true
+            priority: 1
+            label: "OpenClaw/Urgent"
+            notify: true
+
+          - name: "需要回复"
+            rules:
+              keywords: ["please reply", "请回复", "请确认", "what do you think", "你的意见"]
+              has_question: true
+            priority: 2
+            label: "OpenClaw/NeedReply"
+            notify: true
+
+          - name: "FYI"
+            rules:
+              keywords: ["FYI", "供参考", "周知", "通知"]
+              cc_only: true
+            priority: 3
+            label: "OpenClaw/FYI"
+            notify: false
+
+          - name: "订阅/通知"
+            rules:
+              keywords: ["unsubscribe", "newsletter", "notification", "更新提醒"]
+              is_automated: true
+            priority: 4
+            label: "OpenClaw/Newsletter"
+            notify: false
+
+      # === 跟进提醒 ===
+      follow_up:
+        enabled: true
+        default_remind_after: "24h"     # 默认 24 小时无回复提醒
+        check_schedule: "0 10,15 * * 1-5"  # 工作日 10:00 和 15:00 检查
+        channels: ["telegram"]           # 提醒推送渠道
+
+      # === 自动回复 ===
+      auto_reply:
+        enabled: true
+        require_confirmation: true       # 发送前需要确认
+        templates:
+          meeting_confirm:
+            trigger_keywords: ["会议邀请", "meeting invite", "calendar"]
+            template: |
+              收到会议邀请，已确认参加。
+              如有议程或预读材料，请提前发送。谢谢！
+          receipt_acknowledge:
+            trigger_keywords: ["请确认收到", "please acknowledge"]
+            template: |
+              已收到，感谢通知。
+              如有需要进一步沟通的内容，我会尽快回复。
+
+      # === 附件处理 ===
+      attachment:
+        enabled: true
+        auto_save:
+          enabled: true
+          base_path: "${HOME}/Documents/EmailAttachments"
+          organize_by: "sender_and_date"  # 按发件人和日期组织
+        # 自动分类附件
+        classify:
+          enabled: true
+          categories:
+            - name: "发票/收据"
+              extensions: [".pdf", ".jpg", ".png"]
+              keywords: ["invoice", "receipt", "发票", "收据"]
+            - name: "合同"
+              extensions: [".pdf", ".doc", ".docx"]
+              keywords: ["contract", "agreement", "合同"]
+            - name: "报告"
+              extensions: [".pdf", ".xlsx", ".pptx"]
+              keywords: ["report", "报告", "分析"]
+```
+
+## 三、自动邮件摘要
+
+### 3.1 每日摘要
+
+每天早上自动生成昨天未读邮件的分类摘要，推送到你的消息渠道。
+
+```yaml
+# config/workflows/daily-email-summary.yaml
+# 每日邮件摘要工作流
+
+workflows:
+  daily_email_summary:
+    schedule: "0 9 * * 1-5"    # 工作日早上 9 点
+    steps:
+      - name: fetch_emails
+        action: gmail.fetch
+        params:
+          query: "is:unread after:{{yesterday}}"
+          max_results: 50
+
+      - name: classify_and_summarize
+        action: ai.process
+        prompt: |
+          将以下邮件按优先级分类并生成中文摘要。
+
+          邮件列表：
+          {{#each emails}}
+          ---
+          发件人: {{from}}
+          主题: {{subject}}
+          时间: {{date}}
+          摘要: {{snippet}}
+          ---
+          {{/each}}
+
+          请按以下格式输出：
+
+          === 紧急（需要立即处理）===
+          - [发件人] 主题：一句话摘要 + 建议操作
+
+          === 需要回复 ===
+          - [发件人] 主题：一句话摘要 + 建议回复要点
+
+          === 仅需了解（FYI）===
+          - [发件人] 主题：一句话摘要
+
+          === 数据概览 ===
+          总计 X 封新邮件，X 封需要处理，X 封仅需了解
+
+      - name: push_summary
+        action: telegram.send
+        params:
+          message: |
+            邮件日报 - {{date}}
+
+            {{classify_result}}
+```
+
+### 3.2 每周邮件报告
+
+```yaml
+# config/workflows/weekly-email-report.yaml
+
+workflows:
+  weekly_email_report:
+    schedule: "0 17 * * 5"    # 每周五下午 5 点
+    steps:
+      - name: fetch_week_emails
+        action: gmail.fetch
+        params:
+          query: "after:{{week_start}} before:{{today}}"
+
+      - name: analyze
+        action: ai.analyze
+        prompt: |
+          分析本周邮件数据，生成周度报告：
+
+          邮件原始数据（共 {{emails.length}} 封）：
+          {{emails_summary}}
+
+          请输出以下内容：
+          1. 本周邮件统计
+             - 总收件数
+             - 发出邮件数
+             - 未读/未回复数量
+          2. 发件人排行 Top 10（谁给你发最多邮件）
+          3. 高频主题/关键词分析
+          4. 未回复的重要邮件列表
+          5. 平均回复时间
+          6. 效率改进建议
+
+      - name: save_to_notion
+        action: notion.create_page
+        params:
+          database_id: "${NOTION_REPORTS_DB}"
+          properties:
+            Name: "邮件周报 - {{week_range}}"
+            Type: "邮件周报"
+            Date: "{{today}}"
+          content: "{{analysis}}"
+
+      - name: push
+        action: telegram.send
+        params:
+          message: "邮件周报已生成并保存到 Notion，本周共处理 {{emails.length}} 封邮件。"
+```
+
+### 3.3 邮件摘要 API 实现
+
+```python
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+import base64
+import json
+
+class GmailClient:
+    """Gmail API 客户端"""
+
+    SCOPES = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+        'https://www.googleapis.com/auth/gmail.modify',
+    ]
+
+    def __init__(self, credentials_path, token_path):
+        self.credentials_path = credentials_path
+        self.token_path = token_path
+        self.service = self._build_service()
+
+    def _build_service(self):
+        """构建 Gmail API 服务"""
+        creds = None
+        try:
+            creds = Credentials.from_authorized_user_file(self.token_path, self.SCOPES)
+        except FileNotFoundError:
+            pass
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self.credentials_path, self.SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+
+            with open(self.token_path, 'w') as token:
+                token.write(creds.to_json())
+
+        return build('gmail', 'v1', credentials=creds)
+
+    def fetch_emails(self, query="is:unread", max_results=50):
+        """获取邮件列表"""
+        results = self.service.users().messages().list(
+            userId='me', q=query, maxResults=max_results
+        ).execute()
+
+        messages = results.get('messages', [])
+        emails = []
+        for msg in messages:
+            detail = self.service.users().messages().get(
+                userId='me', id=msg['id'], format='metadata',
+                metadataHeaders=['From', 'Subject', 'Date', 'To', 'Cc']
+            ).execute()
+
+            headers = {h['name']: h['value'] for h in detail.get('payload', {}).get('headers', [])}
+            emails.append({
+                'id': msg['id'],
+                'thread_id': detail.get('threadId'),
+                'from': headers.get('From', ''),
+                'to': headers.get('To', ''),
+                'cc': headers.get('Cc', ''),
+                'subject': headers.get('Subject', ''),
+                'date': headers.get('Date', ''),
+                'snippet': detail.get('snippet', ''),
+                'labels': detail.get('labelIds', []),
+                'has_attachments': any(
+                    p.get('filename') for p in detail.get('payload', {}).get('parts', [])
+                )
+            })
+        return emails
+
+    def get_email_body(self, message_id):
+        """获取邮件正文"""
+        msg = self.service.users().messages().get(
+            userId='me', id=message_id, format='full'
+        ).execute()
+
+        payload = msg.get('payload', {})
+        body = ''
+
+        if payload.get('body', {}).get('data'):
+            body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
+        elif payload.get('parts'):
+            for part in payload['parts']:
+                if part['mimeType'] == 'text/plain':
+                    data = part.get('body', {}).get('data', '')
+                    if data:
+                        body = base64.urlsafe_b64decode(data).decode('utf-8')
+                        break
+        return body
+
+    def add_label(self, message_id, label_names):
+        """为邮件添加标签"""
+        # 获取或创建标签
+        label_ids = []
+        existing_labels = self.service.users().labels().list(userId='me').execute()
+        label_map = {l['name']: l['id'] for l in existing_labels.get('labels', [])}
+
+        for name in label_names:
+            if name in label_map:
+                label_ids.append(label_map[name])
+            else:
+                # 创建新标签
+                new_label = self.service.users().labels().create(
+                    userId='me',
+                    body={'name': name, 'labelListVisibility': 'labelShow'}
+                ).execute()
+                label_ids.append(new_label['id'])
+
+        self.service.users().messages().modify(
+            userId='me', id=message_id,
+            body={'addLabelIds': label_ids}
+        ).execute()
+
+    def send_reply(self, message_id, thread_id, to, subject, body):
+        """回复邮件"""
+        from email.mime.text import MIMEText
+        message = MIMEText(body, 'plain', 'utf-8')
+        message['to'] = to
+        message['subject'] = f"Re: {subject}"
+        message['In-Reply-To'] = message_id
+        message['References'] = message_id
+
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+        self.service.users().messages().send(
+            userId='me',
+            body={'raw': raw, 'threadId': thread_id}
+        ).execute()
+```
+
+## 四、智能分类与优先级
+
+### 4.1 AI 驱动的邮件分类
+
+```python
+async def classify_email(gmail_client, openclaw_api, email):
+    """使用 AI 对单封邮件进行智能分类"""
+
+    classification = await openclaw_api.chat(f"""
+    分析这封邮件的紧急程度和类型，返回 JSON 格式：
+
+    发件人: {email['from']}
+    主题: {email['subject']}
+    摘要: {email['snippet']}
+    收件人: {email['to']}
+    抄送: {email['cc']}
+
+    请返回：
+    {{
+        "priority": "high/medium/low",
+        "category": "紧急/需要回复/FYI/订阅通知",
+        "needs_reply": true/false,
+        "reply_deadline": "建议回复时间（如 2 小时内/今天内/本周内）",
+        "action_items": ["提取的待办事项列表"],
+        "summary": "一句话中文摘要",
+        "sentiment": "正面/中性/负面"
+    }}
+    """)
+
+    result = json.loads(classification)
+
+    # 根据分类结果添加 Gmail 标签
+    label_prefix = "OpenClaw"
+    labels = [f"{label_prefix}/{result['category']}"]
+    if result['priority'] == 'high':
+        labels.append(f"{label_prefix}/High Priority")
+
+    gmail_client.add_label(email['id'], labels)
+
+    return result
+
+
+async def batch_classify_emails(gmail_client, openclaw_api, query="is:unread"):
+    """批量分类未读邮件"""
+    emails = gmail_client.fetch_emails(query=query)
+    results = []
+
+    for email in emails:
+        result = await classify_email(gmail_client, openclaw_api, email)
+        results.append({**email, **result})
+
+        # 对高优先级邮件立即推送通知
+        if result['priority'] == 'high':
+            await send_urgent_notification(email, result)
+
+    return results
+```
+
+### 4.2 VIP 发件人配置
+
+```yaml
+# config/skills/gmail-vip.yaml
+# VIP 发件人配置（来自这些人的邮件优先级自动提升）
+
+vip_senders:
+  # 直属领导
+  - email: "boss@company.com"
+    name: "张总"
+    priority_boost: 2       # 优先级提升 2 级
+    always_notify: true     # 总是推送通知
+
+  # 重要客户
+  - email: "*@important-client.com"
+    name: "重要客户"
+    priority_boost: 1
+    always_notify: true
+
+  # 团队成员
+  - email_pattern: "*@myteam.company.com"
+    name: "团队成员"
+    priority_boost: 0
+    always_notify: false
+```
+
+## 五、自动回复模板
+
+### 5.1 回复模板配置
+
+```yaml
+# config/skills/gmail-auto-reply.yaml
+
+auto_reply:
+  enabled: true
+  # 发送前是否需要人工确认
+  require_confirmation: true
+  # 确认超时时间（超时则不发送）
+  confirmation_timeout: "30m"
+
+  templates:
+    # 会议确认
+    meeting_confirm:
+      trigger:
+        keywords: ["会议邀请", "meeting invite", "calendar invitation"]
+        sender_type: "internal"     # 仅内部同事
+      reply: |
+        收到会议邀请，已确认参加。
+        如有议程或预读材料，请提前发送。谢谢！
+
+    # 确认收到
+    receipt_acknowledge:
+      trigger:
+        keywords: ["请确认收到", "please acknowledge", "请查收"]
+        reply_within: "2h"
+      reply: |
+        已收到，感谢通知。
+        如有需要进一步沟通的内容，我会尽快回复。
+
+    # 外出自动回复
+    out_of_office:
+      enabled: false
+      trigger:
+        all_emails: true
+      reply: |
+        感谢来信。我目前不在办公室，将于 {{return_date}} 回来。
+        紧急事务请联系 {{backup_contact}}。
+        非紧急事务我会在回来后第一时间回复。
+
+    # AI 智能回复（根据邮件内容生成个性化回复）
+    ai_smart_reply:
+      enabled: true
+      trigger:
+        category: "需要回复"
+        priority: "medium"
+      prompt: |
+        请为以下邮件生成一个专业、简洁的回复：
+        发件人：{{from}}
+        主题：{{subject}}
+        内容：{{body}}
+
+        要求：
+        1. 用中文回复
+        2. 语气专业友好
+        3. 直接回答问题或确认信息
+        4. 如有需要，提出后续行动建议
+```
+
+### 5.2 AI 回复生成
+
+```python
+async def generate_smart_reply(openclaw_api, email):
+    """使用 AI 生成智能回复"""
+    body = gmail_client.get_email_body(email['id'])
+
+    reply_draft = await openclaw_api.chat(f"""
+    请为以下邮件生成一个专业的回复草稿：
+
+    发件人：{email['from']}
+    主题：{email['subject']}
+    邮件内容：
+    {body[:2000]}
+
+    要求：
+    1. 用中文回复（如果原邮件是英文，则用英文回复）
+    2. 语气专业友好
+    3. 直接回答问题或确认信息
+    4. 控制在 200 字以内
+    5. 不要加「此致敬礼」等过于正式的结尾
+    """)
+
+    return reply_draft
+```
+
+## 六、跟进提醒
+
+### 6.1 跟进提醒配置
+
+```yaml
+# config/workflows/email-follow-up.yaml
+
+workflows:
+  email_follow_up:
+    schedule: "0 10,15 * * 1-5"    # 工作日 10:00 和 15:00
+    steps:
+      - name: check_unreplied
+        action: gmail.fetch
+        params:
+          query: "is:sent after:{{2_days_ago}} -label:replied"
+
+      - name: filter_important
+        action: filter
+        params:
+          condition: "{{email.classification.priority}} in ['high', 'medium']"
+
+      - name: generate_reminder
+        action: ai.process
+        prompt: |
+          以下是你发出但超过 48 小时未收到回复的重要邮件：
+
+          {{#each unreplied_emails}}
+          - 收件人：{{to}}
+          - 主题：{{subject}}
+          - 发送时间：{{sent_at}}
+          - 原始内容摘要：{{snippet}}
+          {{/each}}
+
+          请为每封邮件生成：
+          1. 一句话提醒摘要
+          2. 建议的跟进操作（再次邮件/电话/微信）
+          3. 建议的跟进话术
+
+      - name: push_reminder
+        action: telegram.send
+        params:
+          message: |
+            跟进提醒
+
+            以下邮件已发送超过 48 小时未收到回复：
+
+            {{reminder_content}}
+```
+
+### 6.2 智能跟进策略
+
+```yaml
+# 分级跟进策略
+follow_up_strategy:
+  # 高优先级：24 小时无回复
+  high:
+    first_remind: "24h"
+    second_remind: "48h"
+    escalate: "72h"      # 72 小时后建议升级沟通方式
+    channels: ["telegram", "wecom"]
+
+  # 中优先级：48 小时无回复
+  medium:
+    first_remind: "48h"
+    second_remind: "96h"
+    channels: ["telegram"]
+
+  # 低优先级：不主动提醒
+  low:
+    enabled: false
+```
+
+## 七、附件自动处理
+
+### 7.1 附件分类与保存
+
+```python
+async def handle_attachment(gmail_client, openclaw_api, email):
+    """处理邮件附件"""
+    msg = gmail_client.service.users().messages().get(
+        userId='me', id=email['id'], format='full'
+    ).execute()
+
+    attachments = []
+    parts = msg.get('payload', {}).get('parts', [])
+
+    for part in parts:
+        filename = part.get('filename')
+        if not filename:
+            continue
+
+        # 下载附件
+        attachment_id = part['body'].get('attachmentId')
+        if attachment_id:
+            attachment = gmail_client.service.users().messages().attachments().get(
+                userId='me', messageId=email['id'], id=attachment_id
+            ).execute()
+
+            data = base64.urlsafe_b64decode(attachment['data'])
+
+            # AI 分类附件
+            category = await openclaw_api.chat(f"""
+            请对以下邮件附件进行分类，返回分类名称（发票/合同/报告/图片/其他）：
+            文件名：{filename}
+            发件人：{email['from']}
+            邮件主题：{email['subject']}
+            """)
+
+            category = category.strip()
+
+            # 保存到对应目录
+            import os
+            from datetime import datetime
+            date_str = datetime.now().strftime("%Y/%m")
+            save_dir = f"{os.environ['HOME']}/Documents/EmailAttachments/{category}/{date_str}"
+            os.makedirs(save_dir, exist_ok=True)
+
+            save_path = os.path.join(save_dir, filename)
+            with open(save_path, 'wb') as f:
+                f.write(data)
+
+            attachments.append({
+                "filename": filename,
+                "category": category,
+                "path": save_path,
+                "size": len(data)
+            })
+
+    return attachments
+```
+
+### 7.2 发票自动同步到 Notion
+
+```yaml
+# 当检测到发票附件时，自动创建 Notion 记录
+workflows:
+  invoice_to_notion:
+    trigger: "gmail.attachment_detected"
+    condition: "{{attachment.category}} == '发票'"
+    steps:
+      - name: extract_info
+        action: ai.extract
+        params:
+          file: "{{attachment.path}}"
+          fields: ["金额", "发票号", "开票日期", "付款方", "收款方"]
+
+      - name: save_to_notion
+        action: notion.create_page
+        params:
+          database_id: "${NOTION_INVOICE_DB}"
+          properties:
+            Name: "{{email.subject}} - 发票"
+            Amount: "{{extracted.金额}}"
+            Invoice_No: "{{extracted.发票号}}"
+            Date: "{{extracted.开票日期}}"
+            Source: "{{email.from}}"
+```
+
+## 八、隐私与安全
+
+### 8.1 安全最佳实践
+
+```yaml
+# config/skills/gmail-security.yaml
+
+security:
+  # OAuth Token 管理
+  oauth:
+    # Token 文件权限必须设为 600
+    file_permissions: "600"
+    # 定期刷新 Token
+    auto_refresh: true
+    # Token 轮换周期
+    rotation_days: 90
+
+  # 数据处理
+  data:
+    # 邮件内容仅在本地处理
+    local_processing: true
+    # 发送给 AI 模型时脱敏
+    redact_before_ai:
+      enabled: true
+      patterns:
+        - type: "phone"
+          replace: "[电话号码]"
+        - type: "id_card"
+          replace: "[身份证号]"
+        - type: "bank_card"
+          replace: "[银行卡号]"
+        - type: "password"
+          replace: "[密码已隐藏]"
+
+    # 不处理的邮件标签
+    skip_labels: ["CONFIDENTIAL", "机密"]
+
+    # 邮件内容不写入日志
+    log_content: false
+    # 仅记录元数据
+    log_metadata: true
+
+  # 访问控制
+  access:
+    # 只允许读取，不允许删除
+    allow_delete: false
+    # 自动回复需要确认
+    reply_require_confirmation: true
+    # 敏感操作（如转发邮件）需要二次确认
+    sensitive_actions_require_2fa: true
+```
+
+### 8.2 数据保留策略
+
+```yaml
+data_retention:
+  # 本地缓存的邮件摘要
+  email_summaries:
+    retention_days: 30
+    storage: "encrypted_sqlite"
+
+  # 分类结果
+  classification_results:
+    retention_days: 90
+
+  # 自动清理
+  auto_cleanup:
+    enabled: true
+    schedule: "0 3 1 * *"     # 每月 1 号凌晨 3 点
+```
+
+## 九、效果数据
+
+部署 Gmail 自动化后的效率提升：
+
+| 指标 | 使用前 | 使用后 | 改进 |
+|------|--------|--------|------|
+| 日均处理邮件时间 | 90 分钟 | 15 分钟 | -83% |
+| 重要邮件遗漏率 | 15% | 接近 0% | -15% |
+| 平均回复响应时间 | 4 小时 | 30 分钟 | -87% |
+| 跟进遗漏率 | 25% | 2% | -23% |
+| 附件查找时间 | 10 分钟 | 30 秒 | -95% |
+
+## 总结
+
+通过 OpenClaw 与 Gmail 的深度集成，你可以将大部分邮件处理工作交给 AI 自动完成。从每日摘要到智能分类，从自动回复到跟进提醒，每个环节都经过精心设计以最大化效率提升。
+
+关键要点：
+1. OAuth 配置是基础，确保权限范围合理且 Token 安全
+2. 智能分类可以显著减少邮件处理的认知负担
+3. 跟进提醒机制可以避免重要邮件石沉大海
+4. 隐私安全是底线，敏感信息必须脱敏处理
+
+下一步可以阅读 [日程管理与智能提醒](/learn/topics/calendar-management) 将邮件中的会议邀请自动同步到日历，或者阅读 [用 OpenClaw 管理 Notion 笔记](/learn/topics/notion-management) 将重要邮件摘要自动同步到知识库。

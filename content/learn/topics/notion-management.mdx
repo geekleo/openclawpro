@@ -1,6 +1,6 @@
 ---
 title: "用 OpenClaw 管理 Notion 笔记"
-description: "通过 OpenClaw Notion Skill 实现笔记自动创建、知识库整理、日报周报模板化生成，打造你的第二大脑"
+description: "详解如何通过 OpenClaw 集成 Notion API 实现智能知识管理，涵盖 API 配置、页面与数据库的创建查询、自动知识整理工作流、模板化创建（日报周报会议纪要）及个人知识库搭建实战案例"
 category: "效率工具篇"
 tags: ["Notion", "知识管理", "笔记", "自动化"]
 date: "2026-02-10"
@@ -8,332 +8,947 @@ date: "2026-02-10"
 
 ## 前言
 
-Notion 是目前最流行的全能型笔记和知识管理工具，而 OpenClaw 的 Notion Skill 可以让你通过自然语言或自动化工作流来操作 Notion，实现笔记自动创建、知识库智能整理、日报周报一键生成等功能。
+Notion 是当今最流行的知识管理和团队协作工具之一，其灵活的数据库结构和丰富的内容类型使其成为个人笔记、项目管理、知识库构建的理想选择。然而，随着积累的内容越来越多，手动整理和维护 Notion 工作区变得越来越耗时。
 
-## 一、Notion API 密钥获取
+通过将 OpenClaw 与 Notion API 集成，你可以实现笔记的自动创建、知识的智能分类、日报周报的模板化生成等功能，让 AI 成为你的知识管理助手。
 
-### 1. 创建 Integration
+## 一、Notion API 配置
 
-1. 访问 [Notion Developers](https://developers.notion.com/)
-2. 点击「My Integrations」→「New Integration」
-3. 填写基本信息：
-   - **Name**: OpenClaw Integration
-   - **Associated workspace**: 选择你的工作区
-   - **Type**: Internal
-4. 点击「Submit」，复制生成的 **Internal Integration Secret**
+### 1.1 创建 Notion Integration
 
-### 2. 授权数据库访问
+1. 访问 [Notion Developers](https://www.notion.so/my-integrations)
+2. 点击「New integration」
+3. 填写信息：
+   - Name：`OpenClaw Knowledge Manager`
+   - Associated workspace：选择你的工作区
+   - Type：Internal integration
+4. 创建完成后，获取 **Internal Integration Secret**（以 `ntn_` 开头）
 
-这是最容易遗漏的步骤！你需要手动将 Integration 连接到需要操作的页面或数据库：
+### 1.2 授权 Integration 访问页面
 
-1. 打开目标 Notion 页面或数据库
-2. 点击右上角「...」菜单
-3. 选择「添加连接」（Add connections）
-4. 搜索并选择你创建的 Integration
-5. 确认授权
+Notion Integration 默认没有任何页面的访问权限，你需要手动授权：
 
-> 每个需要 OpenClaw 访问的页面/数据库都需要单独授权。
+1. 打开你想让 OpenClaw 访问的 Notion 页面或数据库
+2. 点击右上角「...」→「Add connections」
+3. 搜索并选择你创建的 Integration（`OpenClaw Knowledge Manager`）
+4. 确认授权
 
-## 二、安装配置 Notion Skill
+**注意：** 你需要为每一个需要访问的顶级页面/数据库单独授权。子页面会自动继承父页面的权限。
+
+### 1.3 安装配置 Notion Skill
 
 ```bash
 # 安装 Notion Skill
 openclaw skill install notion
 
 # 配置 API Key
-openclaw config set notion.api_key "secret_xxxxxxxxxxxxx"
+openclaw config set notion.api_key "ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 # 验证连接
 openclaw notion test
 ```
 
-配置文件 `~/.openclaw/skills/notion/config.yaml`：
+### 1.4 OpenClaw Notion Skill 完整配置
 
 ```yaml
-notion:
-  api_key: "${NOTION_API_KEY}"
-  default_database: "your-database-id"
-  templates:
-    daily_report: "template-page-id"
-    weekly_report: "template-page-id"
-    meeting_notes: "template-page-id"
-  auto_tag: true
-  language: "zh-CN"
+# config/skills/notion.yaml
+# Notion 集成完整配置
+
+skills:
+  notion:
+    enabled: true
+    config:
+      # === 基础凭证 ===
+      api_key: "${NOTION_API_KEY}"
+      api_version: "2022-06-28"
+
+      # === 工作区配置 ===
+      workspace:
+        databases:
+          notes: "abcdef1234567890abcdef1234567890"       # 笔记库
+          tasks: "abcdef1234567890abcdef1234567891"       # 任务库
+          reading_list: "abcdef1234567890abcdef1234567892" # 阅读清单
+          meeting_notes: "abcdef1234567890abcdef1234567893" # 会议纪要
+          reports: "abcdef1234567890abcdef1234567894"      # 日报/周报
+        pages:
+          knowledge_base: "abcdef1234567890abcdef1234567895" # 知识库根页面
+          home: "abcdef1234567890abcdef1234567896"           # 首页
+
+      # === 自动化配置 ===
+      automation:
+        auto_classify:
+          enabled: true
+          tag_property: "Tags"
+          category_property: "Category"
+        templates:
+          daily_report:
+            database: "reports"
+            properties:
+              Type: "日报"
+              Status: "Draft"
+            schedule: "0 18 * * 1-5"
+          weekly_report:
+            database: "reports"
+            properties:
+              Type: "周报"
+              Status: "Draft"
+            schedule: "0 17 * * 5"
 ```
 
-## 三、核心操作
+环境变量：
 
-### 1. 创建页面
-
-```yaml
-# 在指定数据库中创建页面
-action: notion.create_page
-params:
-  database_id: "abc123"
-  properties:
-    标题:
-      title: "每日学习笔记 - 2026-02-10"
-    分类:
-      select: "学习笔记"
-    标签:
-      multi_select: ["OpenClaw", "AI", "自动化"]
-    状态:
-      status: "进行中"
-  content: |
-    ## 今日学习内容
-    - OpenClaw Notion Skill 配置
-    - 自动化工作流搭建
-
-    ## 关键收获
-    - Notion API 的认证机制
-    - 数据库属性的操作方法
+```bash
+# .env
+NOTION_API_KEY=ntn_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### 2. 查询和搜索
+## 二、页面与数据库操作
 
-```yaml
-# 搜索笔记
-action: notion.search
-params:
-  query: "OpenClaw 部署"
-  filter:
-    property: "分类"
-    select:
-      equals: "技术笔记"
-  sort:
-    timestamp: "last_edited_time"
-    direction: "descending"
-  page_size: 10
+### 2.1 Notion API 基础客户端
+
+```python
+import requests
+import json
+from datetime import datetime, timedelta
+
+class NotionClient:
+    """Notion API 客户端"""
+
+    BASE_URL = "https://api.notion.com/v1"
+
+    def __init__(self, api_key):
+        self.api_key = api_key
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+
+    # === 页面操作 ===
+
+    def create_page(self, parent_id, title, content_blocks, properties=None, parent_type="database_id"):
+        """在数据库或页面下创建新页面"""
+        payload = {
+            "parent": {parent_type: parent_id},
+            "properties": properties or {},
+            "children": content_blocks
+        }
+        if parent_type == "database_id" and "Name" not in payload["properties"]:
+            payload["properties"]["Name"] = {
+                "title": [{"text": {"content": title}}]
+            }
+        elif parent_type == "page_id":
+            payload["properties"] = {
+                "title": [{"text": {"content": title}}]
+            }
+        return requests.post(
+            f"{self.BASE_URL}/pages",
+            headers=self.headers,
+            json=payload
+        ).json()
+
+    def get_page(self, page_id):
+        """获取页面信息"""
+        return requests.get(
+            f"{self.BASE_URL}/pages/{page_id}",
+            headers=self.headers
+        ).json()
+
+    def update_page_properties(self, page_id, properties):
+        """更新页面属性"""
+        return requests.patch(
+            f"{self.BASE_URL}/pages/{page_id}",
+            headers=self.headers,
+            json={"properties": properties}
+        ).json()
+
+    def get_page_content(self, page_id):
+        """获取页面内容（Block 列表）"""
+        blocks = []
+        url = f"{self.BASE_URL}/blocks/{page_id}/children"
+        while url:
+            resp = requests.get(url, headers=self.headers).json()
+            blocks.extend(resp.get("results", []))
+            next_cursor = resp.get("next_cursor")
+            if next_cursor:
+                url = f"{self.BASE_URL}/blocks/{page_id}/children?start_cursor={next_cursor}"
+            else:
+                url = None
+        return blocks
+
+    # === 数据库操作 ===
+
+    def query_database(self, database_id, filter_obj=None, sorts=None, page_size=100):
+        """查询数据库"""
+        payload = {"page_size": page_size}
+        if filter_obj:
+            payload["filter"] = filter_obj
+        if sorts:
+            payload["sorts"] = sorts
+
+        return requests.post(
+            f"{self.BASE_URL}/databases/{database_id}/query",
+            headers=self.headers,
+            json=payload
+        ).json()
+
+    def create_database(self, parent_page_id, title, properties):
+        """在页面下创建数据库"""
+        payload = {
+            "parent": {"page_id": parent_page_id},
+            "title": [{"text": {"content": title}}],
+            "properties": properties
+        }
+        return requests.post(
+            f"{self.BASE_URL}/databases",
+            headers=self.headers,
+            json=payload
+        ).json()
+
+    # === 搜索 ===
+
+    def search(self, query, filter_type=None, page_size=10):
+        """搜索工作区内容"""
+        payload = {"query": query, "page_size": page_size}
+        if filter_type:
+            payload["filter"] = {"property": "object", "value": filter_type}
+        return requests.post(
+            f"{self.BASE_URL}/search",
+            headers=self.headers,
+            json=payload
+        ).json()
 ```
 
-### 3. 更新页面属性
+### 2.2 内容 Block 构建工具
 
-```yaml
-action: notion.update_page
-params:
-  page_id: "page-id-here"
-  properties:
-    状态:
-      status: "已完成"
-    完成日期:
-      date:
-        start: "2026-02-10"
+```python
+class NotionBlockBuilder:
+    """Notion 内容块构建工具"""
+
+    @staticmethod
+    def heading(text, level=2):
+        """创建标题块（level: 1/2/3）"""
+        return {
+            "object": "block",
+            "type": f"heading_{level}",
+            f"heading_{level}": {
+                "rich_text": [{"type": "text", "text": {"content": text}}]
+            }
+        }
+
+    @staticmethod
+    def paragraph(text):
+        """创建段落块"""
+        return {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [{"type": "text", "text": {"content": text}}]
+            }
+        }
+
+    @staticmethod
+    def bulleted_list(items):
+        """创建无序列表"""
+        return [
+            {
+                "object": "block",
+                "type": "bulleted_list_item",
+                "bulleted_list_item": {
+                    "rich_text": [{"type": "text", "text": {"content": item}}]
+                }
+            }
+            for item in items
+        ]
+
+    @staticmethod
+    def numbered_list(items):
+        """创建有序列表"""
+        return [
+            {
+                "object": "block",
+                "type": "numbered_list_item",
+                "numbered_list_item": {
+                    "rich_text": [{"type": "text", "text": {"content": item}}]
+                }
+            }
+            for item in items
+        ]
+
+    @staticmethod
+    def todo(text, checked=False):
+        """创建待办事项"""
+        return {
+            "object": "block",
+            "type": "to_do",
+            "to_do": {
+                "rich_text": [{"type": "text", "text": {"content": text}}],
+                "checked": checked
+            }
+        }
+
+    @staticmethod
+    def code(code_text, language="python"):
+        """创建代码块"""
+        return {
+            "object": "block",
+            "type": "code",
+            "code": {
+                "rich_text": [{"type": "text", "text": {"content": code_text}}],
+                "language": language
+            }
+        }
+
+    @staticmethod
+    def callout(text, emoji="bulb"):
+        """创建高亮提示块"""
+        return {
+            "object": "block",
+            "type": "callout",
+            "callout": {
+                "rich_text": [{"type": "text", "text": {"content": text}}],
+                "icon": {"type": "emoji", "emoji": emoji}
+            }
+        }
+
+    @staticmethod
+    def divider():
+        """创建分割线"""
+        return {"object": "block", "type": "divider", "divider": {}}
+
+    @staticmethod
+    def toggle(text, children=None):
+        """创建折叠块"""
+        block = {
+            "object": "block",
+            "type": "toggle",
+            "toggle": {
+                "rich_text": [{"type": "text", "text": {"content": text}}],
+            }
+        }
+        if children:
+            block["toggle"]["children"] = children
+        return block
+
+    @staticmethod
+    def table_of_contents():
+        """创建目录块"""
+        return {"object": "block", "type": "table_of_contents", "table_of_contents": {}}
 ```
 
-## 四、自动化知识整理工作流
+### 2.3 数据库查询与筛选
 
-### 日报自动生成
+```python
+notion = NotionClient(api_key="ntn_xxxxx")
 
-每天下午 6 点自动生成日报：
+# 查询最近 7 天创建的笔记
+week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+recent_notes = notion.query_database(
+    database_id="your_notes_db_id",
+    filter_obj={
+        "property": "Created",
+        "date": {"on_or_after": week_ago}
+    },
+    sorts=[{"property": "Created", "direction": "descending"}]
+)
 
-```yaml
-name: daily_report_to_notion
-schedule: "0 18 * * 1-5"  # 周一到周五 18:00
-steps:
-  - name: collect_data
-    action: aggregate
-    sources:
-      - git_commits_today
-      - calendar_events_today
-      - completed_tasks_today
+# 查询所有未完成的任务
+pending_tasks = notion.query_database(
+    database_id="your_tasks_db_id",
+    filter_obj={
+        "and": [
+            {"property": "Status", "status": {"does_not_equal": "Done"}},
+            {"property": "Priority", "select": {"equals": "High"}}
+        ]
+    },
+    sorts=[
+        {"property": "Due Date", "direction": "ascending"}
+    ]
+)
 
-  - name: generate_report
-    action: ai.summarize
-    prompt: |
-      根据以下数据生成今日工作日报：
-      - Git 提交: {{git_commits}}
-      - 会议: {{calendar_events}}
-      - 完成任务: {{completed_tasks}}
+# 复合筛选：本周完成的高优先级任务
+this_week_done = notion.query_database(
+    database_id="your_tasks_db_id",
+    filter_obj={
+        "and": [
+            {"property": "Status", "status": {"equals": "Done"}},
+            {"property": "Completed Date", "date": {"on_or_after": week_ago}},
+            {
+                "or": [
+                    {"property": "Priority", "select": {"equals": "High"}},
+                    {"property": "Priority", "select": {"equals": "Critical"}}
+                ]
+            }
+        ]
+    }
+)
 
-      格式要求：
-      1. 今日完成（3-5 条）
-      2. 进行中（列出未完成项）
-      3. 明日计划（基于未完成项推断）
-
-  - name: create_notion_page
-    action: notion.create_page
-    params:
-      database_id: "${DAILY_REPORT_DB}"
-      properties:
-        标题:
-          title: "日报 - {{date}}"
-        日期:
-          date:
-            start: "{{date}}"
-      content: "{{generated_report}}"
-
-  - name: notify
-    action: telegram.send
-    params:
-      message: "📝 今日日报已自动生成：{{notion_url}}"
+# 全文搜索
+results = notion.search("OpenClaw 部署", filter_type="page")
+for page in results.get("results", []):
+    title = page["properties"].get("Name", {}).get("title", [{}])
+    if title:
+        print(f"找到页面: {title[0].get('plain_text', 'Untitled')}")
 ```
 
-### 周报自动汇总
+## 三、自动知识整理工作流
 
-```yaml
-name: weekly_report
-schedule: "0 17 * * 5"  # 每周五 17:00
-steps:
-  - name: fetch_daily_reports
-    action: notion.query_database
-    params:
-      database_id: "${DAILY_REPORT_DB}"
-      filter:
-        and:
-          - property: "日期"
-            date:
-              on_or_after: "{{week_start}}"
-          - property: "日期"
-            date:
-              on_or_before: "{{week_end}}"
+### 3.1 智能分类与标签
 
-  - name: summarize
-    action: ai.summarize
-    prompt: |
-      汇总本周 5 天的日报，生成周报：
-      {{daily_reports}}
+```python
+async def auto_classify_note(notion_client, openclaw_api, page_id):
+    """使用 AI 自动为笔记分类和打标签"""
+    # 获取页面内容
+    blocks = notion_client.get_page_content(page_id)
+    content_text = extract_text_from_blocks(blocks)
 
-      周报格式：
-      1. 本周重点成果
-      2. 关键数据指标
-      3. 遇到的问题和解决方案
-      4. 下周计划
+    # 调用 AI 进行分类
+    classification = await openclaw_api.chat(f"""
+    请分析以下笔记内容，返回 JSON 格式的分类结果：
+    {{
+        "category": "技术/产品/管理/生活/学习 之一",
+        "tags": ["标签1", "标签2", "标签3"],
+        "summary": "一句话摘要（不超过100字）",
+        "quality": "Seed/Sapling/Evergreen"
+    }}
 
-  - name: create_weekly_page
-    action: notion.create_page
-    params:
-      database_id: "${WEEKLY_REPORT_DB}"
-      content: "{{weekly_summary}}"
+    笔记内容：
+    {content_text[:3000]}
+    """)
+
+    result = json.loads(classification)
+
+    # 更新 Notion 页面属性
+    notion_client.update_page_properties(page_id, {
+        "Category": {"select": {"name": result["category"]}},
+        "Tags": {"multi_select": [{"name": tag} for tag in result["tags"]]},
+        "Summary": {"rich_text": [{"text": {"content": result["summary"]}}]},
+        "Quality": {"select": {"name": result["quality"]}}
+    })
+
+    return result
+
+def extract_text_from_blocks(blocks):
+    """从 Notion blocks 中提取纯文本"""
+    texts = []
+    for block in blocks:
+        block_type = block.get("type")
+        if block_type and block_type in block:
+            rich_text = block[block_type].get("rich_text", [])
+            for rt in rich_text:
+                texts.append(rt.get("plain_text", ""))
+    return "\n".join(texts)
 ```
 
-### 会议纪要自动记录
+### 3.2 定期整理任务配置
 
 ```yaml
-name: meeting_notes
-trigger: calendar.event_end
-steps:
-  - name: transcribe
-    action: tts.transcribe
-    params:
-      audio_url: "{{meeting_recording_url}}"
+# config/skills/notion-organizer.yaml
+# Notion 知识自动整理
 
-  - name: summarize
-    action: ai.summarize
-    prompt: |
-      根据会议录音转写内容生成会议纪要：
-      {{transcription}}
+skills:
+  notion-organizer:
+    enabled: true
+    config:
+      schedules:
+        # 每天整理未分类笔记
+        classify_uncategorized:
+          cron: "0 22 * * *"
+          action: "auto_classify"
+          filter:
+            property: "Category"
+            select:
+              is_empty: true
 
-      格式：参会人员、讨论要点、决议事项、Action Items（负责人+截止日期）
+        # 每周生成知识图谱
+        weekly_knowledge_map:
+          cron: "0 10 * * 1"
+          action: "generate_knowledge_map"
 
-  - name: save_to_notion
-    action: notion.create_page
-    params:
-      database_id: "${MEETING_NOTES_DB}"
-      properties:
-        标题:
-          title: "{{meeting_title}} - 会议纪要"
-        日期:
-          date:
-            start: "{{meeting_date}}"
-        参会人:
-          multi_select: "{{attendees}}"
-      content: "{{meeting_summary}}"
+        # 每月归档旧笔记
+        monthly_archive:
+          cron: "0 10 1 * *"
+          action: "archive_old_notes"
+          condition:
+            older_than_days: 90
+            status: "Reviewed"
+
+        # 每天检查笔记质量并提升
+        daily_quality_check:
+          cron: "0 21 * * *"
+          action: "quality_upgrade"
+          description: "检查 Seed 笔记是否可以升级为 Sapling"
 ```
 
-## 五、与其他 Skill 联动
+## 四、模板化创建
 
-### RSS → Notion 知识库
+### 4.1 日报自动生成
 
-```yaml
-name: rss_to_notion
-schedule: "0 8 * * *"
-steps:
-  - name: fetch_rss
-    action: rss.fetch
-    params:
-      feeds:
-        - "https://example.com/feed.xml"
-      since: "24h"
+```python
+async def generate_daily_report(notion_client, openclaw_api, report_db_id, task_db_id):
+    """自动生成每日工作报告"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
-  - name: summarize_articles
-    action: ai.batch_summarize
-    params:
-      items: "{{rss_items}}"
-      prompt: "用 3-5 句话总结文章要点，提取关键标签"
+    # 查询今天完成的任务
+    completed_tasks = notion_client.query_database(
+        database_id=task_db_id,
+        filter_obj={
+            "and": [
+                {"property": "Completed Date", "date": {"equals": today}},
+                {"property": "Status", "status": {"equals": "Done"}}
+            ]
+        }
+    )
 
-  - name: save_to_notion
-    action: notion.batch_create
-    params:
-      database_id: "${READING_DB}"
-      items: "{{summarized_articles}}"
-      mapping:
-        标题: "{{title}}"
-        来源: "{{source}}"
-        摘要: "{{summary}}"
-        标签: "{{auto_tags}}"
-        链接: "{{url}}"
+    # 查询明天计划的任务
+    planned_tasks = notion_client.query_database(
+        database_id=task_db_id,
+        filter_obj={
+            "and": [
+                {"property": "Due Date", "date": {"equals": tomorrow}},
+                {"property": "Status", "status": {"does_not_equal": "Done"}}
+            ]
+        }
+    )
+
+    done_items = [get_page_title(t) for t in completed_tasks.get("results", [])]
+    plan_items = [get_page_title(t) for t in planned_tasks.get("results", [])]
+
+    # AI 生成日报内容
+    report_content = await openclaw_api.chat(f"""
+    请根据以下信息生成一份简洁的工作日报：
+
+    今日完成（{len(done_items)} 项）：
+    {chr(10).join(f'- {item}' for item in done_items) or '- 无'}
+
+    明日计划（{len(plan_items)} 项）：
+    {chr(10).join(f'- {item}' for item in plan_items) or '- 待规划'}
+
+    请用简洁的中文输出，包含"今日工作总结"和"明日计划"两个部分，以及一句话的工作心得。
+    """)
+
+    # 构建页面内容
+    bb = NotionBlockBuilder
+    blocks = [
+        bb.table_of_contents(),
+        bb.heading(f"工作日报 - {today}", level=1),
+        bb.callout(f"已完成 {len(done_items)} 项任务，明日计划 {len(plan_items)} 项", "clipboard"),
+        bb.divider(),
+        bb.heading("今日完成", level=2),
+        *[bb.todo(item, checked=True) for item in done_items],
+        bb.divider(),
+        bb.heading("明日计划", level=2),
+        *[bb.todo(item, checked=False) for item in plan_items],
+        bb.divider(),
+        bb.heading("AI 总结", level=2),
+        bb.paragraph(report_content),
+    ]
+
+    # 创建日报页面
+    properties = {
+        "Name": {"title": [{"text": {"content": f"日报 - {today}"}}]},
+        "Type": {"select": {"name": "日报"}},
+        "Date": {"date": {"start": today}},
+        "Status": {"status": {"name": "Draft"}}
+    }
+
+    result = notion_client.create_page(
+        parent_id=report_db_id,
+        title=f"日报 - {today}",
+        content_blocks=blocks,
+        properties=properties
+    )
+    return result
+
+
+def get_page_title(page):
+    """从 Notion 页面对象中提取标题"""
+    title_prop = page.get("properties", {}).get("Name", {})
+    title_list = title_prop.get("title", [])
+    if title_list:
+        return title_list[0].get("plain_text", "Untitled")
+    return "Untitled"
 ```
 
-### 邮件 → Notion
+### 4.2 周报自动生成
+
+```python
+async def generate_weekly_report(notion_client, openclaw_api, report_db_id, task_db_id):
+    """自动生成周报"""
+    today = datetime.now()
+    week_start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+    week_end = today.strftime("%Y-%m-%d")
+
+    # 查询本周完成的任务
+    weekly_tasks = notion_client.query_database(
+        database_id=task_db_id,
+        filter_obj={
+            "and": [
+                {"property": "Completed Date", "date": {"on_or_after": week_start}},
+                {"property": "Completed Date", "date": {"on_or_before": week_end}},
+                {"property": "Status", "status": {"equals": "Done"}}
+            ]
+        }
+    )
+
+    done_items = [get_page_title(t) for t in weekly_tasks.get("results", [])]
+
+    # 查询本周的日报
+    daily_reports = notion_client.query_database(
+        database_id=report_db_id,
+        filter_obj={
+            "and": [
+                {"property": "Type", "select": {"equals": "日报"}},
+                {"property": "Date", "date": {"on_or_after": week_start}},
+                {"property": "Date", "date": {"on_or_before": week_end}}
+            ]
+        }
+    )
+
+    # AI 生成周报
+    summary = await openclaw_api.chat(f"""
+    请根据以下本周完成的工作，生成一份结构化的周报，包含：
+    1. 本周成果概述（2-3句话）
+    2. 关键工作详述（按重要性排序，每项 1-2 句描述）
+    3. 遇到的问题与解决方案
+    4. 下周工作计划（基于未完成任务推断）
+
+    本周完成的 {len(done_items)} 项任务：
+    {chr(10).join(f'- {item}' for item in done_items)}
+    """)
+
+    bb = NotionBlockBuilder
+    blocks = [
+        bb.table_of_contents(),
+        bb.heading(f"周报 {week_start} ~ {week_end}", level=1),
+        bb.callout(f"本周共完成 {len(done_items)} 项任务", "chart_increasing"),
+        bb.divider(),
+        bb.paragraph(summary),
+        bb.divider(),
+        bb.heading("任务完成清单", level=2),
+        *[bb.todo(item, checked=True) for item in done_items],
+    ]
+
+    properties = {
+        "Name": {"title": [{"text": {"content": f"周报 {week_start} ~ {week_end}"}}]},
+        "Type": {"select": {"name": "周报"}},
+        "Date": {"date": {"start": week_start, "end": week_end}},
+        "Status": {"status": {"name": "Draft"}}
+    }
+
+    return notion_client.create_page(report_db_id, f"周报", blocks, properties)
+```
+
+### 4.3 会议纪要自动创建
+
+```python
+async def create_meeting_notes(notion_client, database_id, meeting_info):
+    """自动创建会议纪要模板"""
+    bb = NotionBlockBuilder
+    blocks = [
+        bb.heading(meeting_info["title"], level=1),
+        bb.callout(
+            f"时间：{meeting_info['time']} | 地点：{meeting_info.get('location', '线上')}",
+            "calendar"
+        ),
+        bb.divider(),
+        bb.heading("参会人员", level=2),
+        *bb.bulleted_list(meeting_info.get("attendees", [])),
+        bb.divider(),
+        bb.heading("会议议题", level=2),
+        *bb.numbered_list(meeting_info.get("agenda", ["议题待补充"])),
+        bb.divider(),
+        bb.heading("讨论记录", level=2),
+        bb.paragraph("（在会议过程中记录要点...）"),
+        bb.divider(),
+        bb.heading("决议事项", level=2),
+        *[bb.todo(f"[待分配] {item}") for item in meeting_info.get("agenda", [])],
+        bb.divider(),
+        bb.heading("后续行动 (Action Items)", level=2),
+        bb.todo("[ ] 待补充具体行动项、负责人和截止时间"),
+    ]
+
+    properties = {
+        "Name": {"title": [{"text": {"content": meeting_info["title"]}}]},
+        "Date": {"date": {"start": meeting_info["time"][:10]}},
+        "Status": {"status": {"name": "Active"}},
+    }
+
+    return notion_client.create_page(database_id, meeting_info["title"], blocks, properties)
+```
+
+## 五、与其他 Skill 集成
+
+### 5.1 跨 Skill 集成配置
 
 ```yaml
-name: email_to_notion
-trigger: gmail.important_email
-steps:
-  - name: extract
-    action: ai.extract
-    params:
-      content: "{{email_body}}"
-      fields: ["主题", "要点", "待办事项", "截止日期"]
+# config/skills/notion-integrations.yaml
+# Notion 与其他 Skill 的联动
 
-  - name: create_task
-    action: notion.create_page
-    params:
-      database_id: "${TASK_DB}"
-      properties:
-        标题:
-          title: "邮件待办：{{subject}}"
-        来源:
-          select: "邮件"
-      content: "{{extracted_content}}"
+skills:
+  notion-integrations:
+    enabled: true
+    config:
+      # RSS 文章同步到 Notion 阅读清单
+      rss_to_notion:
+        enabled: true
+        source_skill: "rss"
+        target_database: "reading_list"
+        trigger: "bookmark"
+        properties_mapping:
+          Title: "{{article.title}}"
+          URL: "{{article.url}}"
+          Source: "{{article.source}}"
+          Tags: "{{article.categories}}"
+
+      # Gmail 重要邮件摘要同步到 Notion
+      gmail_to_notion:
+        enabled: true
+        source_skill: "gmail"
+        target_database: "notes"
+        trigger: "important_email"
+        properties_mapping:
+          Title: "邮件摘要: {{email.subject}}"
+          Category: "邮件"
+          Tags: ["邮件", "{{email.from}}"]
+
+      # 日历会议自动创建会议纪要
+      calendar_to_notion:
+        enabled: true
+        source_skill: "calendar"
+        target_database: "meeting_notes"
+        trigger: "meeting_start"
+        before_minutes: 5
+
+      # Telegram 消息快速收藏到 Notion
+      telegram_to_notion:
+        enabled: true
+        source_skill: "telegram"
+        target_database: "notes"
+        trigger: "forward_to_bot"
+        auto_classify: true
+```
+
+### 5.2 快速捕获工作流
+
+```yaml
+# config/workflows/quick-capture.yaml
+# 从任意平台快速记录到 Notion
+
+workflows:
+  quick_capture:
+    trigger:
+      - type: "command"
+        command: "/note"
+      - type: "message"
+        platforms: ["telegram", "wecom", "feishu"]
+        prefix: "记一下"
+
+    steps:
+      - name: "capture_content"
+        action: "parse_message"
+
+      - name: "ai_enhance"
+        action: "openclaw_chat"
+        prompt: |
+          请处理以下快速笔记，返回 JSON 格式：
+          {"title": "简洁标题", "content": "整理后的内容", "tags": ["标签1", "标签2"]}
+          原始内容：{{input}}
+
+      - name: "save_to_notion"
+        action: "notion_create_page"
+        database: "${NOTION_INBOX_DB}"
+        properties:
+          Name: "{{ai_result.title}}"
+          Source: "{{trigger.platform}}"
+          Tags: "{{ai_result.tags}}"
+        content: "{{ai_result.content}}"
+
+      - name: "confirm"
+        action: "reply"
+        message: "已保存到 Notion 收件箱：{{ai_result.title}}"
 ```
 
 ## 六、实战案例：构建个人知识库
 
-### 数据库设计
+### 6.1 知识库架构设计
 
-建议创建以下 Notion 数据库：
+```
+个人知识库 (Knowledge Base)
+|
++-- Inbox 收件箱              # 快速记录，待整理
+|   Properties: Name, Source, Status(Unread/Read/Processed), Tags, Created
+|
++-- Notes 笔记库              # 永久笔记，已分类
+|   Properties: Name, Category, Tags, Summary, Quality(Seed/Sapling/Evergreen), Created, LastEdited
+|   +-- 技术                   # 编程、架构、工具
+|   +-- 产品                   # 产品设计、用户研究
+|   +-- 管理                   # 团队管理、项目管理
+|   +-- 学习                   # 读书笔记、课程笔记
+|
++-- Tasks 任务库              # 待办任务追踪
+|   Properties: Name, Status, Priority, DueDate, CompletedDate, Assignee
+|
++-- Reading List 阅读清单      # 文章/书籍收藏
+|   Properties: Name, URL, Source, Tags, Rating, Summary
+|
++-- Meeting Notes 会议纪要     # 会议记录
+|   Properties: Name, Date, Status, Attendees
+|
++-- Reports 报告库            # 日报/周报/月报
+|   Properties: Name, Type, Date, Status
+|
++-- Archive 归档库            # 已完成/不再活跃的内容
+```
 
-| 数据库 | 用途 | 关键属性 |
-|--------|------|---------|
-| 阅读清单 | 收集文章/书籍 | 标题、来源、分类、评分、摘要 |
-| 学习笔记 | 记录学习内容 | 标题、主题、日期、标签 |
-| 项目记录 | 项目进展跟踪 | 项目名、状态、负责人、截止日期 |
-| 灵感收集 | 记录想法 | 内容、场景、关联项目 |
+### 6.2 知识库初始化脚本
 
-### 自动化流程
+```python
+async def setup_knowledge_base(notion_client, root_page_id):
+    """初始化个人知识库结构"""
 
-1. **输入层**：RSS、邮件、微信消息自动收集到「阅读清单」
+    databases = {}
+
+    # 创建收件箱
+    databases["inbox"] = notion_client.create_database(
+        parent_page_id=root_page_id,
+        title="Inbox - 收件箱",
+        properties={
+            "Name": {"title": {}},
+            "Source": {"select": {"options": [
+                {"name": "手动", "color": "blue"},
+                {"name": "RSS", "color": "green"},
+                {"name": "邮件", "color": "orange"},
+                {"name": "微信", "color": "purple"},
+                {"name": "Telegram", "color": "red"}
+            ]}},
+            "Status": {"status": {"options": [
+                {"name": "Unread", "color": "red"},
+                {"name": "Read", "color": "yellow"},
+                {"name": "Processed", "color": "green"}
+            ]}},
+            "Tags": {"multi_select": {"options": []}},
+            "Created": {"created_time": {}}
+        }
+    )
+
+    # 创建笔记库
+    databases["notes"] = notion_client.create_database(
+        parent_page_id=root_page_id,
+        title="Notes - 笔记库",
+        properties={
+            "Name": {"title": {}},
+            "Category": {"select": {"options": [
+                {"name": "技术", "color": "blue"},
+                {"name": "产品", "color": "green"},
+                {"name": "管理", "color": "orange"},
+                {"name": "学习", "color": "purple"},
+                {"name": "生活", "color": "pink"}
+            ]}},
+            "Tags": {"multi_select": {"options": []}},
+            "Summary": {"rich_text": {}},
+            "Quality": {"select": {"options": [
+                {"name": "Seed", "color": "yellow"},
+                {"name": "Sapling", "color": "green"},
+                {"name": "Evergreen", "color": "blue"}
+            ]}},
+            "Created": {"created_time": {}},
+            "Last Edited": {"last_edited_time": {}}
+        }
+    )
+
+    # 创建任务库
+    databases["tasks"] = notion_client.create_database(
+        parent_page_id=root_page_id,
+        title="Tasks - 任务库",
+        properties={
+            "Name": {"title": {}},
+            "Status": {"status": {"options": [
+                {"name": "Backlog", "color": "default"},
+                {"name": "In Progress", "color": "blue"},
+                {"name": "Done", "color": "green"}
+            ]}},
+            "Priority": {"select": {"options": [
+                {"name": "Critical", "color": "red"},
+                {"name": "High", "color": "orange"},
+                {"name": "Medium", "color": "yellow"},
+                {"name": "Low", "color": "gray"}
+            ]}},
+            "Due Date": {"date": {}},
+            "Completed Date": {"date": {}},
+            "Created": {"created_time": {}}
+        }
+    )
+
+    print("知识库初始化完成！")
+    for name, db in databases.items():
+        print(f"  {name}: {db['id']}")
+    return databases
+```
+
+### 6.3 自动化流水线
+
+配置完成后，整个知识管理流水线如下：
+
+1. **输入层**：RSS、邮件、微信/Telegram 消息自动进入「收件箱」
 2. **处理层**：AI 自动摘要、分类、打标签
-3. **整理层**：每周自动生成知识图谱和学习报告
-4. **输出层**：自动关联到相关项目和笔记
+3. **整理层**：每天自动将已处理内容从收件箱移动到笔记库
+4. **输出层**：自动生成日报/周报，关联到相关项目和任务
 
-### 效果数据
+```yaml
+# 完整自动化流水线配置
+automation_pipeline:
+  # 每天 22:00 处理收件箱
+  process_inbox:
+    cron: "0 22 * * *"
+    steps:
+      - fetch_unprocessed_from_inbox
+      - ai_classify_and_tag
+      - move_to_notes_db
+      - mark_inbox_as_processed
 
-| 指标 | 自动化前 | 自动化后 |
-|------|---------|---------|
-| 每日整理时间 | 45 分钟 | 5 分钟（审核） |
-| 月处理文章数 | 50 篇 | 300+ 篇 |
-| 知识检索效率 | 翻找 10 分钟 | 搜索 10 秒 |
-| 日报生成时间 | 20 分钟 | 0（自动） |
+  # 工作日 18:00 生成日报
+  daily_report:
+    cron: "0 18 * * 1-5"
+    steps:
+      - fetch_today_completed_tasks
+      - fetch_tomorrow_planned_tasks
+      - ai_generate_report
+      - create_report_page
+
+  # 每周五 17:00 生成周报
+  weekly_report:
+    cron: "0 17 * * 5"
+    steps:
+      - fetch_week_daily_reports
+      - fetch_week_completed_tasks
+      - ai_generate_weekly_summary
+      - create_weekly_report_page
+```
 
 ## 常见问题
 
 **Q: 提示 API Key 无效？**
-确认已在目标页面/数据库中添加 Integration 连接（右上角 ... → 添加连接）。
+确认已在目标页面/数据库中添加 Integration 连接（右上角 ... -> 添加连接）。每个顶级页面都需要单独授权。
 
 **Q: 数据库属性类型报错？**
-Notion API 对属性类型有严格要求，确保配置中的属性名称和类型与数据库完全一致。
+Notion API 对属性类型有严格要求，确保配置中的属性名称和类型与数据库中完全一致。使用 `get_page` 方法先获取页面信息来确认属性结构。
+
+**Q: 创建页面时 children 超出限制？**
+Notion API 单次请求最多添加 100 个 blocks。对于长内容，需要先创建页面再分批追加 blocks。
 
 **Q: 内容格式不正确？**
-Notion API 使用 Block 格式，OpenClaw 的 Notion Skill 会自动转换 Markdown 到 Notion Block，但复杂格式可能需要手动调整。
+Notion API 使用 Block 格式而非 Markdown。使用上文的 `NotionBlockBuilder` 工具类可以方便地构建各种 Block。
+
+## 总结
+
+通过 OpenClaw 与 Notion 的深度集成，你可以将繁琐的知识管理工作交给 AI 自动处理。从快速笔记捕获到智能分类，从日报周报的自动生成到跨平台信息同步，每一个环节都可以实现自动化。
+
+关键要点：
+1. 先设计好 Notion 数据库的属性结构，这是自动化的基础
+2. 从简单的场景开始（如快速笔记捕获），验证后再扩展
+3. 善用 AI 进行内容分类和摘要生成
+4. 与其他 Skill 集成可以形成完整的信息处理链路
+
+下一步可以阅读 [Gmail 自动摘要与智能跟进](/learn/topics/gmail-automation) 了解如何将邮件信息自动同步到知识库，或阅读 [RSS 新闻聚合与每日简报](/learn/topics/rss-aggregation) 搭建信息输入管道。
